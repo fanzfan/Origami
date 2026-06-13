@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Origami 右键菜单稀疏包（sparse package）清单。
+  - 声明一个 COM 服务器（in-proc DLL，运行在 Explorer 的代理进程里）。
+  - 通过 windows.fileExplorerContextMenus 把它挂到 Win11 新版右键菜单顶层。
+  - <Identity> 的 Publisher 必须与给包签名的证书 Subject 完全一致。
+  - 用 ExternalLocation 注册时，本清单与 DLL 实际位于 Origami 安装目录。
+  CLSID 必须与 explorer-command/src/lib.rs 中的 CLSID_ORIGAMI_COMMAND 一致。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  IgnorableNamespaces="uap uap3 rescap com desktop4 desktop5">
+
+  <Identity
+    Name="Origami.ShellExtension"
+    Publisher="CN=Origami Local Signing"
+    Version="1.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Origami 右键菜单</DisplayName>
+    <PublisherDisplayName>Origami</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="zh-cn" />
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Origami" Executable="Origami.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App"
+      xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10">
+      <uap:VisualElements
+        AppListEntry="none"
+        DisplayName="Origami"
+        Description="Origami 压缩工具右键菜单"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Extensions>
+    <!-- COM 服务器：context menu 处理器以代理进程内 DLL 形式加载。 -->
+    <com:Extension Category="windows.comServer">
+      <com:ComServer>
+        <com:SurrogateServer DisplayName="Origami Context Menu">
+          <com:Class
+            Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01"
+            Path="origami_explorer_command.dll"
+            ThreadingModel="STA" />
+        </com:SurrogateServer>
+      </com:ComServer>
+    </com:Extension>
+
+    <!-- 挂到文件、文件夹、文件夹背景的新版右键菜单。 -->
+    <desktop4:Extension Category="windows.fileExplorerContextMenus">
+      <desktop4:FileExplorerContextMenus>
+        <desktop5:ItemType Type="*">
+          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+        </desktop5:ItemType>
+        <desktop5:ItemType Type="Directory">
+          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+        </desktop5:ItemType>
+        <desktop5:ItemType Type="Directory\Background">
+          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+        </desktop5:ItemType>
+      </desktop4:FileExplorerContextMenus>
+    </desktop4:Extension>
+  </Extensions>
+</Package>

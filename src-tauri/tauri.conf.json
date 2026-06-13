@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Origami",
+  "version": "0.2.0",
+  "identifier": "dev.vela.origami",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Origami",
+        "visible": false,
+        "width": 1080,
+        "height": 720,
+        "minWidth": 760,
+        "minHeight": 480,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns", "icons/icon.png"],
+    "fileAssociations": [
+      {
+        "ext": ["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst"],
+        "name": "Archive",
+        "description": "Compressed Archive",
+        "role": "Viewer"
+      }
+    ]
+  }
+}
