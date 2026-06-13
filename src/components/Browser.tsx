@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveInfo, Entry, fmtDate, fmtSize } from "../api";
 import { FileIcon } from "../icons";
+import { EntryProperties } from "./dialogs";
 
 interface Props {
   info: ArchiveInfo;
@@ -11,6 +12,7 @@ interface Props {
   onExtract: (entries: string[]) => void;
   onTest: () => void;
   onPreview: (entryPath: string) => void;
+  onOpenExternal: (entryPath: string) => void;
   onAdd: (dir: string) => void;
   onRemove: (entries: string[]) => void;
 }
@@ -25,10 +27,11 @@ interface Row {
   compressed: number;
   mtime: number | null;
   encrypted: boolean;
+  crc: number | null;
   entry: Entry | null; // null for implicit dirs
 }
 
-type SortKey = "name" | "size" | "mtime";
+type SortKey = "name" | "size" | "ratio" | "mtime";
 
 const ENCODINGS: [string, string][] = [
   ["auto", "自动检测"],
@@ -41,6 +44,10 @@ const ENCODINGS: [string, string][] = [
   ["cp437", "DOS (CP437)"],
 ];
 
+function ratioOf(r: { size: number; compressed: number }): number | null {
+  return r.size > 0 ? Math.round((1 - r.compressed / r.size) * 100) : null;
+}
+
 export function Browser(p: Props) {
   const [cwd, setCwd] = useState("");
   const [search, setSearch] = useState("");
@@ -48,6 +55,11 @@ export function Browser(p: Props) {
   const [sortAsc, setSortAsc] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [lastClicked, setLastClicked] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [propsRow, setPropsRow] = useState<Row | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const editable = EDITABLE.has(p.info.format);
 
   const rows = useMemo(() => {
     const prefix = cwd ? cwd + "/" : "";
@@ -68,6 +80,7 @@ export function Browser(p: Props) {
           compressed: e.compressed,
           mtime: e.mtime,
           encrypted: e.encrypted,
+          crc: e.crc,
           entry: e,
         });
         continue;
@@ -80,12 +93,12 @@ export function Browser(p: Props) {
           if (!dirMap.has(rest))
             dirMap.set(rest, {
               name: rest, path: norm, isDir: true, size: 0, compressed: 0,
-              mtime: e.mtime, encrypted: false, entry: e,
+              mtime: e.mtime, encrypted: false, crc: null, entry: e,
             });
         } else {
           files.push({
             name: rest, path: norm, isDir: false, size: e.size, compressed: e.compressed,
-            mtime: e.mtime, encrypted: e.encrypted, entry: e,
+            mtime: e.mtime, encrypted: e.encrypted, crc: e.crc, entry: e,
           });
         }
       } else {
@@ -97,7 +110,7 @@ export function Browser(p: Props) {
         } else {
           dirMap.set(dir, {
             name: dir, path: prefix + dir, isDir: true, size: e.size, compressed: e.compressed,
-            mtime: null, encrypted: false, entry: null,
+            mtime: null, encrypted: false, crc: null, entry: null,
           });
         }
       }
@@ -109,6 +122,7 @@ export function Browser(p: Props) {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       switch (sortKey) {
         case "size": return (a.size - b.size) * dir;
+        case "ratio": return ((ratioOf(a) ?? -1) - (ratioOf(b) ?? -1)) * dir;
         case "mtime": return ((a.mtime ?? 0) - (b.mtime ?? 0)) * dir;
         default: return a.name.localeCompare(b.name, "zh") * dir;
       }
@@ -156,18 +170,121 @@ export function Browser(p: Props) {
     });
   };
 
+  const enterDir = useCallback((path: string) => {
+    setSearch("");
+    setCwd(path);
+    setSelected(new Set());
+  }, []);
+
+  const goUp = useCallback(() => {
+    if (!cwd) return;
+    enterDir(cwd.includes("/") ? cwd.slice(0, cwd.lastIndexOf("/")) : "");
+  }, [cwd, enterDir]);
+
   const onDouble = (row: Row) => {
-    if (row.isDir) {
-      setSearch("");
-      setCwd(row.path);
-      setSelected(new Set());
-    } else {
-      p.onPreview(row.path);
-    }
+    if (row.isDir) enterDir(row.path);
+    else p.onPreview(row.path);
   };
 
   const selCount = selected.size;
   const sortIcon = (k: SortKey) => (sortKey === k ? (sortAsc ? " ↑" : " ↓") : "");
+
+  const selectAll = useCallback(() => setSelected(new Set(rows.map((r) => r.path))), [rows]);
+  const invert = useCallback(
+    () => setSelected((sel) => new Set(rows.filter((r) => !sel.has(r.path)).map((r) => r.path))),
+    [rows],
+  );
+
+  const selectedFiles = useMemo(
+    () => rows.filter((r) => selected.has(r.path) && !r.isDir),
+    [rows, selected],
+  );
+  const selectedBytes = useMemo(
+    () => rows.filter((r) => selected.has(r.path)).reduce((a, r) => a + r.size, 0),
+    [rows, selected],
+  );
+
+  // 右键：若目标不在已选集合中，则先单选它，再弹菜单。
+  const openMenu = (row: Row, e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!selected.has(row.path)) {
+      setSelected(new Set([row.path]));
+      setLastClicked(row.path);
+    }
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  const copy = (text: string) => navigator.clipboard?.writeText(text).catch(() => {});
+
+  // 键盘快捷键：作用于文件列表，输入框聚焦时不拦截（除 Esc）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (e.key === "Escape") {
+        if (search) setSearch("");
+        else if (selected.size) setSelected(new Set());
+        return;
+      }
+      if (mod && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (typing) return;
+      if (mod && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        goUp();
+        return;
+      }
+      if (e.key === "Enter" && selected.size === 1) {
+        e.preventDefault();
+        const row = rows.find((r) => selected.has(r.path));
+        if (row) onDouble(row);
+        return;
+      }
+      if (e.key === " " && selected.size === 1) {
+        const row = rows.find((r) => selected.has(r.path));
+        if (row && !row.isDir) {
+          e.preventDefault();
+          p.onPreview(row.path);
+        }
+        return;
+      }
+      if ((e.key === "Delete" || (e.metaKey && e.key === "Backspace")) && editable && selected.size) {
+        e.preventDefault();
+        p.onRemove([...selected]);
+        setSelected(new Set());
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, selected, search, editable, goUp, selectAll]);
+
+  const menuTargetRow = useMemo(() => {
+    if (selected.size !== 1) return null;
+    return rows.find((r) => selected.has(r.path)) ?? null;
+  }, [rows, selected]);
 
   return (
     <div className="browser">
@@ -181,7 +298,7 @@ export function Browser(p: Props) {
         <button className="btn" onClick={p.onTest}>
           ✓ 校验
         </button>
-        {EDITABLE.has(p.info.format) && (
+        {editable && (
           <>
             <button className="btn" onClick={() => p.onAdd(cwd)} title="添加文件到当前目录">
               ＋ 添加
@@ -193,7 +310,7 @@ export function Browser(p: Props) {
                 p.onRemove([...selected]);
                 setSelected(new Set());
               }}
-              title="从压缩包中删除选中条目"
+              title="从压缩包中删除选中条目（Delete）"
             >
               − 删除 {selCount > 0 ? `(${selCount})` : ""}
             </button>
@@ -213,9 +330,10 @@ export function Browser(p: Props) {
           ))}
         </select>
         <input
+          ref={searchRef}
           className="search"
           type="text"
-          placeholder="搜索归档内文件…"
+          placeholder="搜索归档内文件…（⌘/Ctrl+F）"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -227,15 +345,15 @@ export function Browser(p: Props) {
             {i > 0 && <span className="sep">›</span>}
             <span
               className={`crumb ${i === crumbs.length - 1 ? "current" : ""}`}
-              onClick={() => {
-                setCwd(c.path);
-                setSelected(new Set());
-              }}
+              onClick={() => enterDir(c.path)}
             >
               {c.label}
             </span>
           </span>
         ))}
+        <span className="spacer" />
+        <button className="linkbtn" onClick={selectAll} title="全选（⌘/Ctrl+A）">全选</button>
+        <button className="linkbtn" onClick={invert} title="反选">反选</button>
       </div>
 
       <div className="filelist">
@@ -247,6 +365,9 @@ export function Browser(p: Props) {
                 大小{sortIcon("size")}
               </th>
               <th style={{ width: 90, textAlign: "right" }}>压缩后</th>
+              <th onClick={() => clickSort("ratio")} style={{ width: 64, textAlign: "right" }}>
+                压缩率{sortIcon("ratio")}
+              </th>
               <th onClick={() => clickSort("mtime")} style={{ width: 140 }}>
                 修改时间{sortIcon("mtime")}
               </th>
@@ -254,42 +375,44 @@ export function Browser(p: Props) {
           </thead>
           <tbody>
             {cwd && !search && (
-              <tr
-                onDoubleClick={() => {
-                  const up = cwd.includes("/") ? cwd.slice(0, cwd.lastIndexOf("/")) : "";
-                  setCwd(up);
-                  setSelected(new Set());
-                }}
-              >
+              <tr onDoubleClick={goUp}>
                 <td className="name">
                   <span className="icon">↩️</span>
                   <span>..</span>
                 </td>
                 <td className="num" />
                 <td className="num" />
+                <td className="num" />
                 <td />
               </tr>
             )}
-            {rows.map((r) => (
-              <tr
-                key={r.path}
-                className={selected.has(r.path) ? "sel" : ""}
-                onClick={(e) => toggleSelect(r, e)}
-                onDoubleClick={() => onDouble(r)}
-              >
-                <td className="name">
-                  <FileIcon name={r.name} isDir={r.isDir} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-                  {r.encrypted && <span className="lock">🔒</span>}
-                </td>
-                <td className="num">{r.isDir && r.size === 0 ? "—" : fmtSize(r.size)}</td>
-                <td className="num">{r.compressed > 0 ? fmtSize(r.compressed) : "—"}</td>
-                <td style={{ color: "var(--text-dim)" }}>{fmtDate(r.mtime)}</td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const ratio = ratioOf(r);
+              return (
+                <tr
+                  key={r.path}
+                  className={selected.has(r.path) ? "sel" : ""}
+                  onClick={(e) => toggleSelect(r, e)}
+                  onDoubleClick={() => onDouble(r)}
+                  onContextMenu={(e) => openMenu(r, e)}
+                >
+                  <td className="name">
+                    <FileIcon name={r.name} isDir={r.isDir} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                    {r.encrypted && <span className="lock">🔒</span>}
+                  </td>
+                  <td className="num">{r.isDir && r.size === 0 ? "—" : fmtSize(r.size)}</td>
+                  <td className="num">{r.compressed > 0 ? fmtSize(r.compressed) : "—"}</td>
+                  <td className="num" style={{ color: "var(--text-dim)" }}>
+                    {ratio === null ? "—" : `${ratio}%`}
+                  </td>
+                  <td style={{ color: "var(--text-dim)" }}>{fmtDate(r.mtime)}</td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ textAlign: "center", padding: 30, color: "var(--text-dim)" }}>
+                <td colSpan={5} style={{ textAlign: "center", padding: 30, color: "var(--text-dim)" }}>
                   {search ? "没有匹配的文件" : "空目录"}
                 </td>
               </tr>
@@ -299,17 +422,72 @@ export function Browser(p: Props) {
       </div>
 
       <div className="statusbar">
-        <span>
-          {p.info.entries.length} 个条目 · 原始 {fmtSize(p.info.totalSize)} · 压缩后{" "}
-          {fmtSize(p.info.totalCompressed)}
-          {p.info.totalSize > 0 &&
-            ` · 压缩率 ${Math.round((1 - p.info.totalCompressed / p.info.totalSize) * 100)}%`}
-        </span>
+        {selCount > 0 ? (
+          <span>
+            已选 {selCount} 项{selectedFiles.length > 0 ? ` · ${fmtSize(selectedBytes)}` : ""}
+          </span>
+        ) : (
+          <span>
+            {p.info.entries.length} 个条目 · 原始 {fmtSize(p.info.totalSize)} · 压缩后{" "}
+            {fmtSize(p.info.totalCompressed)}
+            {p.info.totalSize > 0 &&
+              ` · 压缩率 ${Math.round((1 - p.info.totalCompressed / p.info.totalSize) * 100)}%`}
+          </span>
+        )}
         <span className="spacer" />
         {p.info.hasEncrypted && <span>🔒 含加密内容</span>}
         {p.info.comment && <span title={p.info.comment}>💬 含注释</span>}
         <span>{p.info.format}</span>
       </div>
+
+      {menu && (
+        <div
+          className="ctxmenu"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {menuTargetRow && !menuTargetRow.isDir && (
+            <>
+              <button onClick={() => { p.onOpenExternal(menuTargetRow.path); setMenu(null); }}>
+                用默认程序打开
+              </button>
+              <button onClick={() => { p.onPreview(menuTargetRow.path); setMenu(null); }}>
+                预览
+              </button>
+              <div className="sep" />
+            </>
+          )}
+          <button onClick={() => { p.onExtract([...selected]); setMenu(null); }}>
+            解压{selCount > 1 ? `选中 (${selCount})` : "…"}
+          </button>
+          <div className="sep" />
+          {menuTargetRow && (
+            <button onClick={() => { copy(menuTargetRow.name); setMenu(null); }}>复制名称</button>
+          )}
+          <button
+            onClick={() => { copy([...selected].join("\n")); setMenu(null); }}
+          >
+            复制路径{selCount > 1 ? ` (${selCount})` : ""}
+          </button>
+          {menuTargetRow && (
+            <button onClick={() => { setPropsRow(menuTargetRow); setMenu(null); }}>属性</button>
+          )}
+          {editable && (
+            <>
+              <div className="sep" />
+              <button
+                className="danger"
+                onClick={() => { p.onRemove([...selected]); setSelected(new Set()); setMenu(null); }}
+              >
+                从压缩包删除{selCount > 1 ? ` (${selCount})` : ""}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {propsRow && <EntryProperties entry={propsRow} onClose={() => setPropsRow(null)} />}
     </div>
   );
 }

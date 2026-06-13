@@ -2,11 +2,16 @@ pub mod archive;
 #[cfg(not(target_os = "macos"))]
 pub mod cli;
 pub mod encoding;
+#[cfg(target_os = "macos")]
+pub mod macassoc;
 pub mod passwords;
 #[cfg(target_os = "macos")]
 pub mod services;
 #[cfg(target_os = "macos")]
 pub mod sysicon;
+pub mod sysauth;
+#[cfg(target_os = "windows")]
+pub mod winassoc;
 #[cfg(target_os = "windows")]
 pub mod winmenu;
 
@@ -194,6 +199,7 @@ async fn create_archive(
     method: Option<String>,
     password: Option<String>,
     volume_size: Option<u64>,
+    exclude_junk: Option<bool>,
 ) -> CmdResult<String> {
     let cancel = jobs.register(&job_id);
     let jobs2 = jobs.inner().clone();
@@ -207,6 +213,7 @@ async fn create_archive(
             method: method.unwrap_or_default(),
             password,
             volume_size: volume_size.unwrap_or(0),
+            exclude_junk: exclude_junk.unwrap_or(false),
         };
         let dest_path = PathBuf::from(&dest);
         let r = archive::create::create(&ctx, &dest_path, &sources, &opts);
@@ -371,6 +378,80 @@ fn pw_remove(app: tauri::AppHandle, password: String) -> CmdResult<()> {
     passwords::remove(&app, &password).map_err(err_str)
 }
 
+/// 当前平台是否提供可用的系统级身份验证（Touch ID / Windows Hello / 登录密码）。
+#[tauri::command]
+fn system_auth_available() -> bool {
+    sysauth::available()
+}
+
+/// 触发系统认证（用于在展示已保存密码前校验本人）。返回是否通过。
+#[tauri::command]
+async fn system_auth(reason: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || sysauth::authenticate(&reason).map_err(err_str))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 把单个条目解压到缓存临时目录并返回其完整路径，供前端用系统默认程序打开。
+#[tauri::command]
+async fn extract_entry_to_temp(
+    app: tauri::AppHandle,
+    jobs: tauri::State<'_, Arc<Jobs>>,
+    path: String,
+    entry: String,
+    password: Option<String>,
+    encoding: Option<String>,
+) -> CmdResult<String> {
+    use tauri::Manager;
+    let job_id = format!("open-{}", std::process::id());
+    let cancel = jobs.register(&job_id);
+    let fallbacks = passwords::candidates(&app);
+    let jobs2 = jobs.inner().clone();
+    let jid = job_id.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let base = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("open");
+        // 用条目相对路径的哈希做子目录，避免多次打开互相覆盖。
+        let sub = format!("{:x}", seahash_like(&entry));
+        let dest = base.join(sub);
+        std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+        let ctx = Ctx { app: &app, cancel };
+        let opts = ExtractOptions {
+            job_id: jid,
+            password: password.clone(),
+            fallback_passwords: fallbacks,
+            encoding: encoding.unwrap_or_else(|| "auto".into()),
+            entries: vec![entry.clone()],
+            smart: false,
+        };
+        archive::extract::extract(&ctx, &PathBuf::from(&path), &dest, &opts).map_err(err_str)?;
+        let rel =
+            archive::sanitize_rel_path(&entry).ok_or_else(|| "条目路径非法".to_string())?;
+        let out = dest.join(rel);
+        if !out.exists() {
+            return Err("解压后未找到目标文件".to_string());
+        }
+        Ok(out.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    jobs2.finish(&job_id);
+    res
+}
+
+/// 轻量非加密哈希，仅用于生成临时目录名。
+fn seahash_like(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 #[tauri::command]
 fn take_pending_actions(pending: tauri::State<'_, Arc<Pending>>) -> Vec<PendingAction> {
     std::mem::take(&mut *pending.0.lock().unwrap())
@@ -421,6 +502,89 @@ fn shell_menu_installed() -> bool {
 #[tauri::command]
 fn app_platform() -> &'static str {
     std::env::consts::OS
+}
+
+// ---------------- 文件关联管理 ----------------
+
+/// 可由本应用接管的压缩包扩展名（与 tauri.conf.json 的 fileAssociations 对齐）。
+const ASSOC_EXTS: &[&str] = &["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst"];
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssocEntry {
+    ext: String,
+    /// 当前是否由 Origami 关联为默认。
+    associated: bool,
+    /// 当前默认打开程序的标识（win: ProgID；mac: bundle id），仅供展示。
+    current_app: Option<String>,
+}
+
+/// 当前平台是否支持运行时文件关联管理。
+#[tauri::command]
+fn file_assoc_supported() -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
+}
+
+#[tauri::command]
+fn file_assoc_list() -> Vec<AssocEntry> {
+    ASSOC_EXTS
+        .iter()
+        .map(|&ext| {
+            #[cfg(target_os = "macos")]
+            {
+                AssocEntry {
+                    ext: ext.to_string(),
+                    associated: macassoc::is_associated(ext),
+                    current_app: macassoc::current(ext),
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                AssocEntry {
+                    ext: ext.to_string(),
+                    associated: winassoc::is_associated(ext),
+                    current_app: winassoc::current(ext),
+                }
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            {
+                AssocEntry {
+                    ext: ext.to_string(),
+                    associated: false,
+                    current_app: None,
+                }
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn file_assoc_set(exts: Vec<String>, associate: bool) -> CmdResult<()> {
+    for ext in &exts {
+        let ext = ext.trim_start_matches('.');
+        #[cfg(target_os = "macos")]
+        {
+            if associate {
+                macassoc::associate(ext).map_err(err_str)?;
+            } else {
+                macassoc::remove(ext).map_err(err_str)?;
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if associate {
+                winassoc::associate(ext).map_err(err_str)?;
+            } else {
+                winassoc::remove(ext).map_err(err_str)?;
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let _ = (ext, associate);
+            return Err("当前平台不支持文件关联管理".into());
+        }
+    }
+    Ok(())
 }
 
 /// 为快速压缩计算默认输出路径：与源同目录、按选中内容命名、避免覆盖已有文件。
@@ -577,6 +741,9 @@ pub fn run() {
             pw_list,
             pw_add,
             pw_remove,
+            system_auth_available,
+            system_auth,
+            extract_entry_to_temp,
             default_extract_dir,
             default_create_dest,
             take_pending_actions,
@@ -587,6 +754,9 @@ pub fn run() {
             uninstall_shell_menu,
             shell_menu_installed,
             app_platform,
+            file_assoc_supported,
+            file_assoc_list,
+            file_assoc_set,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
