@@ -17,6 +17,33 @@ pub struct CreateOptions {
     pub password: Option<String>,
     /// Split the result into volumes of this many bytes (.001/.002…). 0 = off.
     pub volume_size: u64,
+    /// 跳过 .DS_Store / __MACOSX / Thumbs.db 等无意义的系统资源文件。
+    pub exclude_junk: bool,
+}
+
+/// 这些是各操作系统自动生成、压缩时通常无需保留的资源/缓存文件。
+/// 命中其路径中任意一段（文件名或目录名）即视为垃圾。
+pub(crate) fn is_junk_component(name: &str) -> bool {
+    // AppleDouble 资源派生文件（._foo）。
+    if let Some(rest) = name.strip_prefix("._") {
+        // 排除恰好叫 ".." 之类的边角；".__" 也按资源派生处理。
+        let _ = rest;
+        return true;
+    }
+    matches!(
+        name,
+        ".DS_Store"
+            | "__MACOSX"
+            | ".Spotlight-V100"
+            | ".Trashes"
+            | ".fseventsd"
+            | ".DocumentRevisions-V100"
+            | ".TemporaryItems"
+            | ".apdisk"
+            | "Thumbs.db"
+            | "ehthumbs.db"
+            | "desktop.ini"
+    )
 }
 
 pub(crate) struct SourceFile {
@@ -27,7 +54,10 @@ pub(crate) struct SourceFile {
     pub(crate) is_symlink: bool,
 }
 
-pub(crate) fn collect_sources(sources: &[String]) -> anyhow::Result<Vec<SourceFile>> {
+pub(crate) fn collect_sources(
+    sources: &[String],
+    exclude_junk: bool,
+) -> anyhow::Result<Vec<SourceFile>> {
     let mut out = Vec::new();
     for src in sources {
         let p = Path::new(src);
@@ -39,7 +69,18 @@ pub(crate) fn collect_sources(sources: &[String]) -> anyhow::Result<Vec<SourceFi
             .ok_or_else(|| anyhow::anyhow!("非法路径 {src}"))?
             .to_string();
         if meta.is_dir() {
-            for entry in walkdir::WalkDir::new(p).follow_links(false) {
+            for entry in walkdir::WalkDir::new(p)
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|e| {
+                    // 剪掉垃圾目录/文件，连同其子项一起跳过。
+                    !exclude_junk
+                        || e.file_name()
+                            .to_str()
+                            .map(|n| !is_junk_component(n))
+                            .unwrap_or(true)
+                })
+            {
                 let entry = entry?;
                 let rel_inner = entry
                     .path()
@@ -66,7 +107,7 @@ pub(crate) fn collect_sources(sources: &[String]) -> anyhow::Result<Vec<SourceFi
                     is_symlink: ft.is_symlink(),
                 });
             }
-        } else {
+        } else if !(exclude_junk && is_junk_component(&base_name)) {
             out.push(SourceFile {
                 abs: p.to_path_buf(),
                 rel: base_name,
@@ -89,7 +130,7 @@ pub fn create(
     sources: &[String],
     opts: &CreateOptions,
 ) -> anyhow::Result<String> {
-    let files = collect_sources(sources)?;
+    let files = collect_sources(sources, opts.exclude_junk)?;
     // 进度按已读入的源文件字节计。
     let total: u64 = files.iter().map(|f| f.size).sum();
     let t = Tracker::new(ctx, &opts.job_id, total);

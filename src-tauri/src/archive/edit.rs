@@ -22,7 +22,7 @@ pub fn add_files(
     opts: &EditOptions,
 ) -> anyhow::Result<()> {
     let dir = dir.trim_matches('/');
-    let mut files = create::collect_sources(sources)?;
+    let mut files = create::collect_sources(sources, false)?;
     if !dir.is_empty() {
         for f in &mut files {
             f.rel = format!("{dir}/{}", f.rel);
@@ -130,6 +130,7 @@ fn edit_zip(
         method: String::new(),
         password: opts.password.clone(),
         volume_size: 0,
+        exclude_junk: false,
     };
     for f in add {
         t.check()?;
@@ -211,6 +212,7 @@ fn edit_rebuild(
         method: String::new(),
         password: opts.password.clone(),
         volume_size: 0,
+        exclude_junk: false,
     };
     create::create(ctx, &out, &roots, &copts)?;
 

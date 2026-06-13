@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, ArchiveInfo, newJobId, Progress } from "./api";
 import { Welcome } from "./components/Welcome";
 import { Browser } from "./components/Browser";
 import {
   CreateDialog,
   ExtractDialog,
+  FileAssociations,
   ShellIntegration,
   PasswordManager,
   PasswordPrompt,
@@ -61,26 +62,31 @@ export default function App() {
   const [pwPrompt, setPwPrompt] = useState<{ resolve: (pw: string | null) => void } | null>(null);
   const [showPwMgr, setShowPwMgr] = useState(false);
   const [showFinder, setShowFinder] = useState(false);
+  const [showAssoc, setShowAssoc] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
   const [extractFor, setExtractFor] = useState<{ entries: string[] } | null>(null);
   const [createFor, setCreateFor] = useState<string[] | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
 
-  // ----- settings: persist + apply (zoom + font), plus Ctrl/Cmd +/-/0 -----
+  // ----- settings: persist + apply (zoom + font)，外加平台习惯的快捷键 -----
+  // Mac 用 Cmd，Windows/Linux 用 Ctrl，和绝大多数应用一致。
+  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
   useEffect(() => {
     applySettings(settings);
     saveSettings(settings);
   }, [settings]);
 
-  const setScale = useCallback((s: number) => {
-    setSettings((cur) => ({ ...cur, scale: clampScale(s) }));
-  }, []);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (e.key === "=" || e.key === "+") {
+      // 主修饰键：Mac=Cmd(meta)，其它平台=Ctrl
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (!mod || e.altKey) return;
+      // Cmd+, / Ctrl+, 打开设置
+      if (e.key === ",") {
+        e.preventDefault();
+        setShowSettings(true);
+      } else if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         setSettings((c) => ({ ...c, scale: clampScale(c.scale + SCALE_STEP) }));
       } else if (e.key === "-" || e.key === "_") {
@@ -93,7 +99,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [isMac]);
 
   const toastId = useRef(0);
   const toast = useCallback((kind: Toast["kind"], text: string) => {
@@ -198,7 +204,14 @@ export default function App() {
       try {
         const dest = await api.defaultCreateDest(sources, format);
         if (!useMini) setJob({ jobId, title: "正在压缩…", progress: null });
-        const out = await api.createArchive({ jobId, dest, sources, format, level: 6 });
+        const out = await api.createArchive({
+          jobId,
+          dest,
+          sources,
+          format,
+          level: settings.level,
+          excludeJunk: settings.excludeJunk,
+        });
         toast("ok", `压缩完成：${out.split("/").pop()}`);
         revealItemInDir(out).catch(() => {});
         return true;
@@ -214,7 +227,7 @@ export default function App() {
         if (!useMini) setJob(null);
       }
     },
-    [toast],
+    [toast, settings.level, settings.excludeJunk],
   );
 
   const draining = useRef(false);
@@ -344,7 +357,7 @@ export default function App() {
       setCreateFor(null);
       setJob({ jobId, title: "正在压缩…", progress: null });
       try {
-        const out = await api.createArchive({ jobId, sources, ...p });
+        const out = await api.createArchive({ jobId, sources, excludeJunk: settings.excludeJunk, ...p });
         toast("ok", "压缩完成");
         revealItemInDir(out).catch(() => {});
       } catch (e) {
@@ -355,7 +368,7 @@ export default function App() {
         setJob(null);
       }
     },
-    [createFor, toast],
+    [createFor, toast, settings.excludeJunk],
   );
 
   const runAdd = useCallback(
@@ -401,6 +414,36 @@ export default function App() {
     [archivePath, password, encoding, openArchive, toast],
   );
 
+  const openExternal = useCallback(
+    async (entryPath: string) => {
+      if (!archivePath) return;
+      try {
+        const file = await api.extractEntryToTemp({
+          path: archivePath,
+          entry: entryPath,
+          password,
+          encoding,
+        });
+        await openPath(file);
+      } catch (e) {
+        const msg = String(e);
+        if (msg === "PASSWORD_REQUIRED") {
+          const pw = await askPassword();
+          if (pw) {
+            setPassword(pw);
+            try {
+              const file = await api.extractEntryToTemp({ path: archivePath, entry: entryPath, password: pw, encoding });
+              await openPath(file);
+            } catch (e2) {
+              toast("error", `打开失败：${e2}`);
+            }
+          }
+        } else toast("error", `打开失败：${msg}`);
+      }
+    },
+    [archivePath, password, encoding, askPassword, toast],
+  );
+
   const runTest = useCallback(async () => {
     if (!archivePath) return;
     const jobId = newJobId();
@@ -440,11 +483,14 @@ export default function App() {
         <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
           🧩
         </button>
+        <button className="btn ghost sm" onClick={() => setShowAssoc(true)} title="文件关联">
+          🔗
+        </button>
         <button className="btn ghost sm" onClick={() => setShowPwMgr(true)} title="密码管理器">
           🔑
         </button>
-        <button className="btn ghost sm" onClick={() => setShowSettings(true)} title="设置">
-          ⚙
+        <button className="btn ghost sm" onClick={() => setShowSettings(true)} title={isMac ? "设置 (⌘,)" : "设置 (Ctrl+,)"}>
+          <span style={{ fontSize: "1.2em", lineHeight: 1 }}>⚙️</span>
         </button>
       </div>
 
@@ -458,6 +504,7 @@ export default function App() {
           onExtract={(entries) => setExtractFor({ entries })}
           onTest={runTest}
           onPreview={(p) => setPreviewPath(p)}
+          onOpenExternal={openExternal}
           onAdd={runAdd}
           onRemove={runRemove}
         />
@@ -490,6 +537,7 @@ export default function App() {
       {createFor && (
         <CreateDialog
           sources={createFor}
+          defaultLevel={settings.level}
           onCancel={() => setCreateFor(null)}
           onConfirm={runCreate}
           pickDest={async (defName: string, ext: string) => {
@@ -515,12 +563,12 @@ export default function App() {
 
       {showFinder && <ShellIntegration onClose={() => setShowFinder(false)} toast={toast} />}
 
+      {showAssoc && <FileAssociations onClose={() => setShowAssoc(false)} toast={toast} />}
+
       {showSettings && (
         <SettingsDialog
-          scale={settings.scale}
-          font={settings.font}
-          onScale={setScale}
-          onFont={(f) => setSettings((c) => ({ ...c, font: f }))}
+          settings={settings}
+          onChange={(patch) => setSettings((c) => ({ ...c, ...patch }))}
           onClose={() => setShowSettings(false)}
         />
       )}

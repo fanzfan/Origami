@@ -68,6 +68,7 @@ export const api = {
     method?: string;
     password?: string;
     volumeSize?: number;
+    excludeJunk?: boolean;
   }) => invoke<string>("create_archive", { ...p }),
 
   archiveAdd: (p: {
@@ -102,6 +103,11 @@ export const api = {
   pwAdd: (password: string, label?: string) => invoke<void>("pw_add", { password, label }),
   pwRemove: (password: string) => invoke<void>("pw_remove", { password }),
 
+  systemAuthAvailable: () => invoke<boolean>("system_auth_available"),
+  systemAuth: (reason: string) => invoke<boolean>("system_auth", { reason }),
+  extractEntryToTemp: (p: { path: string; entry: string; password?: string; encoding?: string }) =>
+    invoke<string>("extract_entry_to_temp", { ...p }),
+
   defaultExtractDir: (path: string) => invoke<string>("default_extract_dir", { path }),
   defaultCreateDest: (sources: string[], ext: string) =>
     invoke<string>("default_create_dest", { sources, ext }),
@@ -115,12 +121,23 @@ export const api = {
   shellMenuInstalled: () => invoke<boolean>("shell_menu_installed"),
   appPlatform: () => invoke<string>("app_platform"),
 
+  fileAssocSupported: () => invoke<boolean>("file_assoc_supported"),
+  fileAssocList: () => invoke<AssocEntry[]>("file_assoc_list"),
+  fileAssocSet: (exts: string[], associate: boolean) =>
+    invoke<void>("file_assoc_set", { exts, associate }),
+
   onProgress: (cb: (p: Progress) => void): Promise<UnlistenFn> =>
     listen<Progress>("job-progress", (e) => cb(e.payload)),
 
   onDeepLink: (cb: () => void): Promise<UnlistenFn> =>
     listen("deep-link-available", () => cb()),
 };
+
+export interface AssocEntry {
+  ext: string;
+  associated: boolean;
+  currentApp: string | null;
+}
 
 export type PendingAction =
   | { kind: "open"; paths: string[] }

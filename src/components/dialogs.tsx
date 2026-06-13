@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { api, fmtSize, Preview, SavedPassword } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, AssocEntry, fmtDate, fmtSize, Preview, SavedPassword } from "../api";
 import type { JobState } from "../App";
-import { FONTS, SCALE_MAX, SCALE_MIN, SCALE_STEP, clampScale } from "../settings";
+import { FONTS, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
 function Modal(p: { title: string; wide?: boolean; children: React.ReactNode; footer?: React.ReactNode; onClose?: () => void }) {
   return (
@@ -111,6 +111,7 @@ const VOLUMES: [number, string][] = [
 
 export function CreateDialog(p: {
   sources: string[];
+  defaultLevel?: number;
   onCancel: () => void;
   onConfirm: (opts: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number }) => void;
   pickDest: (defName: string, ext: string) => Promise<string | null>;
@@ -118,7 +119,7 @@ export function CreateDialog(p: {
   const defName = (p.sources[0]?.split("/").pop() ?? "archive").replace(/\.[^.]+$/, "") || "archive";
   const [format, setFormat] = useState("zip");
   const [method, setMethod] = useState("");
-  const [level, setLevel] = useState(6);
+  const [level, setLevel] = useState(p.defaultLevel ?? 6);
   const [password, setPassword] = useState("");
   const [volume, setVolume] = useState(0);
   const [dest, setDest] = useState("");
@@ -242,46 +243,66 @@ export function CreateDialog(p: {
 
 // ---------------- Settings ----------------
 
+const LEVEL_HINT: Record<number, string> = {
+  0: "仅存储，不压缩（最快）",
+  9: "最高压缩率（最慢）",
+};
+
 export function SettingsDialog(p: {
-  scale: number;
-  font: string;
-  onScale: (s: number) => void;
-  onFont: (f: string) => void;
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
   onClose: () => void;
 }) {
-  const pct = Math.round(p.scale * 100);
+  const s = p.settings;
+  const pct = Math.round(s.scale * 100);
+  const setScale = (v: number) => p.onChange({ scale: clampScale(v) });
+
   return (
     <Modal
       title="设置"
       onClose={p.onClose}
-      footer={
-        <>
-          <button className="btn" onClick={() => p.onScale(1)}>恢复默认大小</button>
-          <button className="btn primary" onClick={p.onClose}>完成</button>
-        </>
-      }
+      footer={<button className="btn primary" onClick={p.onClose}>完成</button>}
     >
+      <div className="settings-section">外观</div>
+
+      <div className="field">
+        <label>主题</label>
+        <div className="theme-grid">
+          {THEMES.map(([key, name, color]) => (
+            <div
+              key={key}
+              className={`theme-swatch ${s.theme === key ? "on" : ""}`}
+              onClick={() => p.onChange({ theme: key })}
+            >
+              <span className="dot" style={{ background: color }} />
+              {name}
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="field">
         <label>界面字体大小：{pct}%</label>
         <div className="row" style={{ alignItems: "center", gap: 10 }}>
-          <button className="btn sm" onClick={() => p.onScale(clampScale(p.scale - SCALE_STEP))}>－</button>
+          <button className="btn sm" onClick={() => setScale(s.scale - SCALE_STEP)}>－</button>
           <input
             type="range"
             min={SCALE_MIN}
             max={SCALE_MAX}
             step={SCALE_STEP}
-            value={p.scale}
-            onChange={(e) => p.onScale(clampScale(Number(e.target.value)))}
+            value={s.scale}
+            onChange={(e) => setScale(Number(e.target.value))}
             style={{ flex: 1 }}
           />
-          <button className="btn sm" onClick={() => p.onScale(clampScale(p.scale + SCALE_STEP))}>＋</button>
+          <button className="btn sm" onClick={() => setScale(s.scale + SCALE_STEP)}>＋</button>
+          <button className="btn sm" onClick={() => setScale(1)}>复位</button>
         </div>
         <div className="hint">快捷键：Ctrl/⌘ 加 + 或 - 调整，Ctrl/⌘ 加 0 复位。</div>
       </div>
 
       <div className="field">
         <label>字体</label>
-        <select value={p.font} onChange={(e) => p.onFont(e.target.value)}>
+        <select value={s.font} onChange={(e) => p.onChange({ font: e.target.value })}>
           {FONTS.map(([key, name]) => (
             <option key={key} value={key}>
               {name}
@@ -289,6 +310,35 @@ export function SettingsDialog(p: {
           ))}
         </select>
       </div>
+
+      <div className="settings-section">压缩与解压</div>
+
+      <div className="field">
+        <label>
+          默认压缩等级：{s.level === 0 ? "仅存储" : s.level}
+          {s.level === 9 ? "（最高）" : ""}
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={9}
+          value={s.level}
+          onChange={(e) => p.onChange({ level: Number(e.target.value) })}
+        />
+        <div className="hint">{LEVEL_HINT[s.level] ?? "压缩率与速度的平衡，新建压缩时作为默认值。"}</div>
+      </div>
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={s.excludeJunk}
+          onChange={(e) => p.onChange({ excludeJunk: e.target.checked })}
+        />
+        <span className="grow">
+          压缩时排除系统垃圾文件
+          <div className="hint">自动跳过 .DS_Store、__MACOSX、._ 资源派生、Thumbs.db、desktop.ini 等。</div>
+        </span>
+      </label>
     </Modal>
   );
 }
@@ -339,16 +389,70 @@ export function PasswordPrompt(p: { onSubmit: (pw: string | null) => void }) {
 
 // ---------------- Password manager ----------------
 
+type AuthPhase = "checking" | "ready" | "denied";
+
 export function PasswordManager(p: { onClose: () => void }) {
   const [list, setList] = useState<SavedPassword[]>([]);
   const [newPw, setNewPw] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [reveal, setReveal] = useState(false);
+  const [phase, setPhase] = useState<AuthPhase>("checking");
 
   const refresh = () => api.pwList().then(setList);
+
+  const authenticate = async () => {
+    setPhase("checking");
+    try {
+      const need = await api.systemAuthAvailable();
+      if (!need) {
+        setPhase("ready");
+        refresh();
+        return;
+      }
+      const ok = await api.systemAuth("查看已保存的归档密码");
+      if (ok) {
+        setPhase("ready");
+        refresh();
+      } else {
+        setPhase("denied");
+      }
+    } catch {
+      // 认证机制异常时不锁死用户查看自己的密码。
+      setPhase("ready");
+      refresh();
+    }
+  };
+
   useEffect(() => {
-    refresh();
+    authenticate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (phase !== "ready") {
+    return (
+      <Modal
+        title="密码管理器"
+        onClose={p.onClose}
+        footer={
+          <>
+            <button className="btn" onClick={p.onClose}>关闭</button>
+            {phase === "denied" && (
+              <button className="btn primary" onClick={authenticate}>重试验证</button>
+            )}
+          </>
+        }
+      >
+        <div className="auth-gate">
+          <div className="auth-icon">{phase === "denied" ? "🔒" : "🪪"}</div>
+          {phase === "checking" ? (
+            <p>正在通过系统验证你的身份…<br /><span className="hint">请在弹出的系统对话框中使用指纹 / 面容 / 系统密码。</span></p>
+          ) : (
+            <p>身份验证未通过，无法查看已保存的密码。<br /><span className="hint">出于安全考虑，需先通过系统验证。</span></p>
+          )}
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -398,6 +502,158 @@ export function PasswordManager(p: { onClose: () => void }) {
           </div>
         ))}
       </div>
+    </Modal>
+  );
+}
+
+// ---------------- File associations ----------------
+
+export function FileAssociations(p: { onClose: () => void; toast: (kind: "ok" | "error" | "info", text: string) => void }) {
+  const [list, setList] = useState<AssocEntry[] | null>(null);
+  const [desired, setDesired] = useState<Record<string, boolean>>({});
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [os, setOs] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    const rows = await api.fileAssocList();
+    setList(rows);
+    setDesired(Object.fromEntries(rows.map((r) => [r.ext, r.associated])));
+  };
+
+  useEffect(() => {
+    api.appPlatform().then(setOs);
+    api.fileAssocSupported().then(setSupported);
+    refresh();
+  }, []);
+
+  const isWin = os === "windows";
+  const baseline = useMemo(() => Object.fromEntries((list ?? []).map((r) => [r.ext, r.associated])), [list]);
+  const dirty = useMemo(
+    () => (list ?? []).some((r) => desired[r.ext] !== baseline[r.ext]),
+    [list, desired, baseline],
+  );
+
+  const setAll = (v: boolean) => setDesired(Object.fromEntries((list ?? []).map((r) => [r.ext, v])));
+
+  const apply = async () => {
+    const toAssoc = (list ?? []).filter((r) => desired[r.ext] && !baseline[r.ext]).map((r) => r.ext);
+    const toRemove = (list ?? []).filter((r) => !desired[r.ext] && baseline[r.ext]).map((r) => r.ext);
+    setBusy(true);
+    try {
+      if (toAssoc.length) await api.fileAssocSet(toAssoc, true);
+      if (toRemove.length) await api.fileAssocSet(toRemove, false);
+      await refresh();
+      p.toast("ok", `已更新 ${toAssoc.length + toRemove.length} 个文件关联`);
+    } catch (e) {
+      p.toast("error", `更新失败：${e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="文件关联"
+      onClose={p.onClose}
+      footer={
+        <>
+          <button className="btn" onClick={p.onClose}>关闭</button>
+          <button className="btn primary" disabled={busy || !dirty || supported === false} onClick={apply}>
+            应用更改
+          </button>
+        </>
+      }
+    >
+      {supported === false ? (
+        <p className="hint" style={{ margin: 0 }}>当前平台不支持在应用内管理文件关联。</p>
+      ) : (
+        <>
+          <p className="hint" style={{ margin: 0 }}>
+            勾选要让 Origami 作为默认打开程序的压缩格式，然后点「应用更改」。
+          </p>
+          <div className="row" style={{ justifyContent: "flex-start", gap: 8 }}>
+            <button className="btn sm" onClick={() => setAll(true)}>全选</button>
+            <button className="btn sm" onClick={() => setAll(false)}>全不选</button>
+          </div>
+          <div className="assoc-list">
+            {!list && <div className="hint">加载中…</div>}
+            {list?.map((r) => (
+              <label className="assoc-item" key={r.ext}>
+                <input
+                  type="checkbox"
+                  checked={desired[r.ext] ?? false}
+                  onChange={(e) => setDesired((d) => ({ ...d, [r.ext]: e.target.checked }))}
+                  style={{ width: "auto" }}
+                />
+                <span className="ext">.{r.ext}</span>
+                <span className="cur hint">
+                  {r.associated ? "当前：Origami" : r.currentApp ? `当前：${r.currentApp}` : "当前：系统默认"}
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="hint" style={{ opacity: 0.7, fontSize: 12, margin: 0 }}>
+            {isWin
+              ? "写入当前用户的注册表（HKCU），无需管理员权限；更改在重启资源管理器或重新登录后稳定生效。"
+              : "通过 Launch Services 即时设置；取消关联会还原为系统「归档实用工具」。需应用已被系统识别（安装到「应用程序」）。"}
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------- Entry properties ----------------
+
+export function EntryProperties(p: {
+  entry: {
+    name: string;
+    path: string;
+    isDir: boolean;
+    size: number;
+    compressed: number;
+    mtime: number | null;
+    encrypted: boolean;
+    crc: number | null;
+  };
+  onClose: () => void;
+}) {
+  const e = p.entry;
+  const ratio = e.size > 0 ? Math.round((1 - e.compressed / e.size) * 100) : null;
+  const rows: [string, React.ReactNode][] = [
+    ["名称", e.name],
+    ["路径", e.path],
+    ["类型", e.isDir ? "文件夹" : "文件"],
+    ["原始大小", `${fmtSize(e.size)}（${e.size.toLocaleString()} 字节）`],
+  ];
+  if (!e.isDir) {
+    rows.push(["压缩后", e.compressed > 0 ? fmtSize(e.compressed) : "—"]);
+    rows.push(["压缩率", ratio === null ? "—" : `${ratio}%`]);
+    rows.push([
+      "CRC32",
+      e.crc !== null ? e.crc.toString(16).toUpperCase().padStart(8, "0") : "—",
+    ]);
+  }
+  rows.push(["修改时间", fmtDate(e.mtime)]);
+  rows.push(["加密", e.encrypted ? "是 🔒" : "否"]);
+
+  return (
+    <Modal
+      title="属性"
+      onClose={p.onClose}
+      footer={<button className="btn primary" onClick={p.onClose}>关闭</button>}
+    >
+      <table className="props">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <th>{k}</th>
+              <td>{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </Modal>
   );
 }
