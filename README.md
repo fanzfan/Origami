@@ -76,3 +76,28 @@ windows-extension/        Win11 新版顶层右键菜单脚手架（IExplorerCom
 
 - **密码可见性**：密码管理器在展示明文前调用系统认证；无可用认证的平台直接放行（不阻断用户查看自己的密码）。
 - **Windows 右键菜单**：经典菜单（注册表）已接入主程序；Win11 新版顶层菜单需 MSIX/稀疏包签名注册，详见 [`windows-extension/README.md`](windows-extension/README.md)。
+
+## 在 Windows 上开发与验证
+
+开发主力机为 macOS，Windows 相关功能（注册表关联、右键菜单、Windows Hello）只能在 Windows 上真实运行验证。
+
+前置：Node.js、Rust（MSVC 工具链 `stable-x86_64-pc-windows-msvc`）、WebView2 Runtime、Visual Studio Build Tools（含 C++ 工作负载，liblzma/zstd 等 C 库依赖它编译）。
+
+```powershell
+npm install
+npx tsc --noEmit                  # 前端类型检查
+cd src-tauri; cargo check         # 后端编译（Windows 分支可真实编译）
+npm run tauri dev                 # 开发模式（Windows 无 macOS 的旧 app 抢前台问题，所见即当前代码）
+npm run tauri build               # 出 .msi / .exe
+```
+
+需在 Windows 上重点验证的功能（这些是 macOS 上只能编译保证、无法运行的 `#[cfg(windows)]` 分支）：
+
+| 功能 | 文件 | 验证步骤 |
+| --- | --- | --- |
+| 文件关联（写 HKCU 注册表） | `winassoc.rs` | 关联面板勾选某格式 → 资源管理器里该格式默认程序变为 Origami；取消勾选能还原 |
+| 经典右键菜单 | `winmenu.rs` | 右键菜单面板「安装」→ 文件上右键出现 Origami 项并能打开；「移除」后菜单项干净消失 |
+| Windows Hello 密码门控 | `sysauth.rs` | 打开密码管理器 → 弹出 Hello 验证；取消验证不显示明文；无 Hello 环境下不被锁死 |
+| 快捷键 | `App.tsx` | `Ctrl + ,` 开设置；`Ctrl + +/-` 调字号、`Ctrl + 0` 复位 |
+| 快捷压缩迷你窗 | — | 从右键菜单直接压缩时弹出迷你进度窗，无需打开主界面 |
+| Win11 新版顶层菜单 | `windows-extension/` | 跑 `windows-extension/build.ps1`，按其 README 完成 MSIX/稀疏包签名注册后验证 |

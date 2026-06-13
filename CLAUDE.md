@@ -29,6 +29,18 @@ npm run tauri build               # 发行构建（.app / .dmg 等）
 - 保证 **macOS 构建仍能编译**：`cargo check`（darwin 目标）+ `tsc` 必须干净。
 - 不要尝试 `cargo check --target x86_64-pc-windows-msvc`——C 工具链（liblzma 等）无法交叉编译，这是预期限制，不是代码错误。
 
+### 在 Windows 上验证（交给用户执行）
+
+环境：Rust MSVC 工具链、WebView2 Runtime、VS Build Tools（C++ 工作负载）。命令：`npx tsc --noEmit`、`cd src-tauri; cargo check`、`npm run tauri dev` / `npm run tauri build`。Windows 没有 macOS 的「旧 app 抢前台」坑，`tauri dev` 即所见即当前代码。
+
+每次涉及 Windows 分支的改动，提示用户按此清单实测：
+
+- **文件关联**（`winassoc.rs`）：关联面板勾选/取消 → 资源管理器默认程序随之变更并能还原。
+- **经典右键菜单**（`winmenu.rs`）：安装后文件右键出现 Origami 项并能打开；移除后干净消失。
+- **Windows Hello 密码门控**（`sysauth.rs`）：查看明文前弹 Hello；取消则不显示；无 Hello 不被锁死。
+- **快捷键**（`App.tsx`）：`Ctrl + ,` 开设置；`Ctrl + +/-/0` 调字号/复位。
+- **Win11 新版顶层菜单**（`windows-extension/`）：跑 `build.ps1` 并按其 README 完成签名注册后验证。
+
 ## 架构
 
 - **命令注册**：后端命令在 `src-tauri/src/lib.rs` 用 `#[tauri::command]` 定义并在 `tauri::generate_handler!` 注册；前端在 `src/api.ts` 用 `invoke` 封装后供组件调用。三处要一致。
