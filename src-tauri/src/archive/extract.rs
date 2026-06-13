@@ -375,7 +375,13 @@ fn extract_zip(
                 std::fs::create_dir_all(parent)?;
             }
             let _ = std::fs::remove_file(&out_path);
-            std::os::unix::fs::symlink(target, &out_path)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &out_path)?;
+            // Windows 创建符号链接需特权；失败则把目标路径写成普通文件，避免解压中断。
+            #[cfg(windows)]
+            if std::os::windows::fs::symlink_file(&target, &out_path).is_err() {
+                std::fs::write(&out_path, target.as_bytes())?;
+            }
             continue;
         }
         write_streamed(&t, &mut f, &out_path)?;

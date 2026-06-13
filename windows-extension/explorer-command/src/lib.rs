@@ -8,9 +8,10 @@
 //! 此 DLL 必须随一个 **MSIX 稀疏包** 注册，且包必须经过签名（自签名+本机信任
 //! 即可用于开发；分发需 Authenticode/受信任证书）。注册方式见 ../README.md。
 //!
-//! 注意：本文件按 `windows` crate 0.58 的接口签名编写。换版本时
-//! IExplorerCommand_Impl 等 trait 的方法签名（尤其 Ref<>/PCWSTR 形参）可能
-//! 需要微调——这是休眠脚手架，需在 Windows 上实际编译后再校准。
+//! 注意：本文件按 `windows` crate 0.58 的接口签名编写，已在 Windows 上编译通过
+//! （依赖 `windows` 的 `implement` 特性）。换 crate 版本时 IExplorerCommand_Impl 等
+//! trait 的方法签名（shell 项参数 Option<&IShellItemArray>、CreateInstance 的
+//! Option<&IUnknown>、Skip/Reset 的 Result<()> 等）可能需要再次微调。
 
 #![allow(non_snake_case)]
 
@@ -22,7 +23,6 @@ use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
-use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -100,8 +100,7 @@ unsafe fn launch(format: &str, items: Option<&IShellItemArray>) -> Result<()> {
 fn title_pwstr(s: &str) -> Result<PWSTR> {
     // 返回的字符串由调用方用 CoTaskMemFree 释放，故用 SHStrDupW 复制。
     unsafe {
-        let mut out = PWSTR::null();
-        SHStrDupW(PCWSTR(wide(s).as_ptr()), &mut out)?;
+        let out = SHStrDupW(PCWSTR(wide(s).as_ptr()))?;
         Ok(out)
     }
 }
@@ -117,23 +116,23 @@ struct SubCommand {
 }
 
 impl IExplorerCommand_Impl for SubCommand_Impl {
-    fn GetTitle(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetTitle(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         title_pwstr(self.title)
     }
-    fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetIcon(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         Err(E_NOTIMPL.into())
     }
-    fn GetToolTip(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetToolTip(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         Err(E_NOTIMPL.into())
     }
     fn GetCanonicalName(&self) -> Result<GUID> {
         Ok(GUID::zeroed())
     }
-    fn GetState(&self, _items: Ref<IShellItemArray>, _slow: BOOL) -> Result<u32> {
+    fn GetState(&self, _items: Option<&IShellItemArray>, _slow: BOOL) -> Result<u32> {
         Ok(ECS_ENABLED.0 as u32)
     }
-    fn Invoke(&self, items: Ref<IShellItemArray>, _bind: Ref<IBindCtx>) -> Result<()> {
-        unsafe { launch(self.format, items.as_ref()) }
+    fn Invoke(&self, items: Option<&IShellItemArray>, _bind: Option<&IBindCtx>) -> Result<()> {
+        unsafe { launch(self.format, items) }
     }
     fn GetFlags(&self) -> Result<u32> {
         Ok(ECF_DEFAULT.0 as u32)
@@ -188,13 +187,13 @@ impl IEnumExplorerCommand_Impl for SubEnum_Impl {
             S_FALSE
         }
     }
-    fn Skip(&self, celt: u32) -> HRESULT {
+    fn Skip(&self, celt: u32) -> Result<()> {
         self.index.set((self.index.get() + celt as usize).min(self.items.len()));
-        S_OK
+        Ok(())
     }
-    fn Reset(&self) -> HRESULT {
+    fn Reset(&self) -> Result<()> {
         self.index.set(0);
-        S_OK
+        Ok(())
     }
     fn Clone(&self) -> Result<IEnumExplorerCommand> {
         let e: IEnumExplorerCommand = SubEnum {
@@ -214,23 +213,23 @@ impl IEnumExplorerCommand_Impl for SubEnum_Impl {
 struct CompressRoot;
 
 impl IExplorerCommand_Impl for CompressRoot_Impl {
-    fn GetTitle(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetTitle(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         title_pwstr("用 Origami 压缩")
     }
-    fn GetIcon(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetIcon(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         // 可返回 "Origami.exe,0"（资源图标）。此处留空，用默认。
         Err(E_NOTIMPL.into())
     }
-    fn GetToolTip(&self, _items: Ref<IShellItemArray>) -> Result<PWSTR> {
+    fn GetToolTip(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         Err(E_NOTIMPL.into())
     }
     fn GetCanonicalName(&self) -> Result<GUID> {
         Ok(CLSID_ORIGAMI_COMMAND)
     }
-    fn GetState(&self, _items: Ref<IShellItemArray>, _slow: BOOL) -> Result<u32> {
+    fn GetState(&self, _items: Option<&IShellItemArray>, _slow: BOOL) -> Result<u32> {
         Ok(ECS_ENABLED.0 as u32)
     }
-    fn Invoke(&self, _items: Ref<IShellItemArray>, _bind: Ref<IBindCtx>) -> Result<()> {
+    fn Invoke(&self, _items: Option<&IShellItemArray>, _bind: Option<&IBindCtx>) -> Result<()> {
         // 有子菜单时顶层不直接执行。
         Ok(())
     }
@@ -257,11 +256,11 @@ struct Factory;
 impl IClassFactory_Impl for Factory_Impl {
     fn CreateInstance(
         &self,
-        outer: Ref<IUnknown>,
+        outer: Option<&IUnknown>,
         iid: *const GUID,
         object: *mut *mut c_void,
     ) -> Result<()> {
-        if outer.as_ref().is_some() {
+        if outer.is_some() {
             return Err(CLASS_E_NOAGGREGATION.into());
         }
         let root: IExplorerCommand = CompressRoot.into();

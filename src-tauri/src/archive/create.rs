@@ -356,8 +356,17 @@ fn create_zip_parallel<R: tauri::Runtime>(
 }
 
 fn file_mode(p: &Path) -> Option<u32> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::symlink_metadata(p).ok().map(|m| m.permissions().mode() & 0o7777)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::symlink_metadata(p).ok().map(|m| m.permissions().mode() & 0o7777)
+    }
+    // Windows 无 Unix 权限位，归档不写 mode。
+    #[cfg(not(unix))]
+    {
+        let _ = p;
+        None
+    }
 }
 
 fn file_mtime_zip(p: &Path) -> Option<zip::DateTime> {
