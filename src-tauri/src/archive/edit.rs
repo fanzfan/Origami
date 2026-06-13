@@ -189,7 +189,13 @@ fn edit_rebuild(
         } else if f.is_symlink {
             let target = std::fs::read_link(&f.abs)?;
             let _ = std::fs::remove_file(&dst);
-            std::os::unix::fs::symlink(target, &dst)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &dst)?;
+            // Windows 创建符号链接需特权；失败则退化为复制链接指向的内容。
+            #[cfg(windows)]
+            if std::os::windows::fs::symlink_file(&target, &dst).is_err() {
+                std::fs::copy(&f.abs, &dst)?;
+            }
         } else {
             std::fs::copy(&f.abs, &dst)?;
         }

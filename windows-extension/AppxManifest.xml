@@ -15,6 +15,7 @@
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   IgnorableNamespaces="uap uap3 rescap com desktop4 desktop5">
 
   <Identity
@@ -27,6 +28,8 @@
     <DisplayName>Origami 右键菜单</DisplayName>
     <PublisherDisplayName>Origami</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <!-- 稀疏包：负载（DLL/exe/Assets）在 ExternalLocation，须显式允许外部内容。 -->
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
   </Properties>
 
   <Dependencies>
@@ -39,8 +42,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="Origami" Executable="Origami.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App"
-      xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10">
+    <Application Id="Origami" Executable="Origami.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
       <uap:VisualElements
         AppListEntry="none"
         DisplayName="Origami"
@@ -48,35 +50,41 @@
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
+
+      <!-- 右键菜单扩展必须挂在 <Application> 内部（包级 Extensions 不接受 desktop4:Extension）。 -->
+      <Extensions>
+        <!-- COM 服务器：context menu 处理器以代理进程内 DLL 形式加载。 -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="Origami Context Menu">
+              <com:Class
+                Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01"
+                Path="origami_explorer_command.dll"
+                ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+
+        <!-- 挂到文件、文件夹、文件夹背景的新版右键菜单。 -->
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory\Background">
+              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+      </Extensions>
     </Application>
   </Applications>
 
-  <Extensions>
-    <!-- COM 服务器：context menu 处理器以代理进程内 DLL 形式加载。 -->
-    <com:Extension Category="windows.comServer">
-      <com:ComServer>
-        <com:SurrogateServer DisplayName="Origami Context Menu">
-          <com:Class
-            Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01"
-            Path="origami_explorer_command.dll"
-            ThreadingModel="STA" />
-        </com:SurrogateServer>
-      </com:ComServer>
-    </com:Extension>
-
-    <!-- 挂到文件、文件夹、文件夹背景的新版右键菜单。 -->
-    <desktop4:Extension Category="windows.fileExplorerContextMenus">
-      <desktop4:FileExplorerContextMenus>
-        <desktop5:ItemType Type="*">
-          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
-        </desktop5:ItemType>
-        <desktop5:ItemType Type="Directory">
-          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
-        </desktop5:ItemType>
-        <desktop5:ItemType Type="Directory\Background">
-          <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
-        </desktop5:ItemType>
-      </desktop4:FileExplorerContextMenus>
-    </desktop4:Extension>
-  </Extensions>
+  <!-- win32App（mediumIL 全信任）扩展必须声明 runFullTrust 受限能力。 -->
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
 </Package>
