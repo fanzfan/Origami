@@ -722,6 +722,14 @@ pub fn run() {
                 let actions = cli::parse_args(&args);
                 dispatch_actions(app.handle(), actions);
             }
+            // Windows 去掉原生标题栏，改用前端自绘标题栏（窗口创建时 visible:false，无闪烁）。
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.set_decorations(false);
+                }
+            }
             let _ = app;
             Ok(())
         })
