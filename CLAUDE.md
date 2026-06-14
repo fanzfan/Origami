@@ -38,6 +38,7 @@ npm run tauri build               # 发行构建（.app / .dmg 等）
 - **文件关联**（`winassoc.rs`）：关联面板勾选/取消 → 资源管理器默认程序随之变更并能还原。
 - **经典右键菜单**（`winmenu.rs`）：安装后文件右键出现 Origami 项并能打开；移除后干净消失。
 - **Windows Hello 密码门控**（`sysauth.rs`）：查看明文前弹 Hello；取消则不显示；无 Hello 不被锁死。
+- **密码存储到凭据管理器**（`passwords.rs` + keyring）：添加密码后，`passwords.json` 只应有 id/备注/时间戳（无明文），明文应出现在「凭据管理器 → Windows 凭据」里 service `dev.vela.origami.passwords`；删除后凭据条目一并消失。
 - **快捷键**（`App.tsx`）：`Ctrl + ,` 开设置；`Ctrl + +/-/0` 调字号/复位。
 - **Win11 新版顶层菜单**（`windows-extension/`）：跑 `build.ps1` 并按其 README 完成签名注册后验证。
 
@@ -48,6 +49,7 @@ npm run tauri build               # 发行构建（.app / .dmg 等）
 - **窗口显隐**：主窗口 `visible: false`，前端挂载后调用 `frontend_ready` 命令才 `show()`；快捷压缩启动时改用 `mini` 进度窗口。
 - **重活异步化**：解压/压缩等阻塞操作用 `spawn_blocking`，通过 job + 进度事件回传前端，可取消。
 - **密码门控**：密码管理器展示明文前先 `system_auth`（Touch ID / Windows Hello）；认证不可用时放行，认证出错时不要把用户锁死在外。
+- **密码存储**：`passwords.rs` 用 `keyring` crate 把明文存进系统凭据库（钥匙串 / 凭据管理器，service `dev.vela.origami.passwords`、account 为每条的随机 id）；`passwords.json` 只存索引（id/备注/时间戳），不落明文。旧版明文文件在 `load`/`add` 等入口自动迁移（写入 keyring 后剥离 password 字段并回写）。keyring 按平台启用 `apple-native` / `windows-native` 后端。
 
 ## 约定
 

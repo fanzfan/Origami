@@ -10,7 +10,7 @@
   - 读写：`zip`（含 AES）、`7z`（含 AES-256）、`tar`、`gz`/`tgz`、`bz2`/`tbz2`、`xz`/`txz`、`zst`/`tzst`、`jar`、`apk`
   - 只读：`rar`
 - **加密归档**：自动识别加密项并按需提示输入密码。
-- **密码管理器**：保存常用归档密码；查看明文前需通过**系统认证**（macOS Touch ID / 登录密码，Windows Hello）。
+- **密码管理器**：保存常用归档密码，明文存于**系统凭据库**（macOS 钥匙串 / Windows 凭据管理器），本地仅留索引不落明文；查看明文前需通过**系统认证**（macOS Touch ID / 登录密码，Windows Hello）。
 - **文件关联管理**：一键把 Origami 设为各压缩格式的默认打开程序，并显示每种格式的当前处理器。
 - **右键菜单集成**：
   - macOS：通过文件关联接入「打开方式」。
@@ -74,6 +74,7 @@ windows-extension/        Win11 新版顶层右键菜单脚手架（IExplorerCom
 
 ## 平台说明
 
+- **密码存储**：密码明文写入系统凭据库（钥匙串 / 凭据管理器），`app_data_dir/passwords.json` 只保存索引（id、备注、时间戳），不含明文；旧版明文文件首次启动时自动迁移。
 - **密码可见性**：密码管理器在展示明文前调用系统认证；无可用认证的平台直接放行（不阻断用户查看自己的密码）。
 - **Windows 右键菜单**：经典菜单（注册表）已接入主程序；Win11 新版顶层菜单需 MSIX/稀疏包签名注册，详见 [`windows-extension/README.md`](windows-extension/README.md)。
 
