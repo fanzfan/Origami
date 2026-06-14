@@ -1,0 +1,93 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="100" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9DAAF4"/>
+      <stop offset="0.52" stop-color="#7FB0F0"/>
+      <stop offset="1" stop-color="#6CC9EA"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.32" cy="0.28" r="0.85">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="vignette" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0.6" stop-color="#2C3E8F" stop-opacity="0"/>
+      <stop offset="1" stop-color="#2C3E8F" stop-opacity="0.16"/>
+    </linearGradient>
+
+    <linearGradient id="paperA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#F1F6FC"/>
+    </linearGradient>
+    <linearGradient id="paperB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4F8FD"/>
+      <stop offset="1" stop-color="#E2EBF7"/>
+    </linearGradient>
+    <linearGradient id="paperC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E8F0F9"/>
+      <stop offset="1" stop-color="#D2DFEF"/>
+    </linearGradient>
+    <linearGradient id="paperD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DCE7F3"/>
+      <stop offset="1" stop-color="#C4D4E9"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFC861"/>
+      <stop offset="1" stop-color="#F7A22E"/>
+    </linearGradient>
+
+    <radialGradient id="moon" cx="0.4" cy="0.36" r="0.75">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#EAF2FF" stop-opacity="0.78"/>
+    </radialGradient>
+
+    <filter id="birdShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDev="14" flood-color="#21356A" flood-opacity="0.28"/>
+    </filter>
+    <filter id="softBlur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+
+    <clipPath id="squircle">
+      <path d="M512 104
+        C 760 104 818 104 873 159
+        C 920 206 920 264 920 512
+        C 920 760 920 818 865 873
+        C 818 920 760 920 512 920
+        C 264 920 206 920 151 865
+        C 104 818 104 760 104 512
+        C 104 264 104 206 159 151
+        C 206 104 264 104 512 104 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- background -->
+  <g clip-path="url(#squircle)">
+    <rect x="104" y="104" width="816" height="816" fill="url(#bg)"/>
+    <rect x="104" y="104" width="816" height="816" fill="url(#glow)"/>
+    <rect x="104" y="104" width="816" height="816" fill="url(#vignette)"/>
+    <!-- soft moon -->
+    <circle cx="772" cy="250" r="54" fill="url(#moon)"/>
+
+    <!-- soft contact shadow under the crane -->
+    <ellipse cx="505" cy="742" rx="210" ry="30" fill="#162a52" opacity="0.22" filter="url(#softBlur)"/>
+
+    <!-- origami crane -->
+    <g filter="url(#birdShadow)" stroke="#AEC1DA" stroke-width="2" stroke-opacity="0.45" stroke-linejoin="round">
+      <!-- tail (left) -->
+      <polygon points="250,520 372,556 332,604" fill="url(#paperC)"/>
+      <!-- belly / lower fold -->
+      <polygon points="338,572 612,560 470,694" fill="url(#paperD)"/>
+      <!-- wing left half -->
+      <polygon points="500,250 338,572 505,566" fill="url(#paperA)"/>
+      <!-- wing right half -->
+      <polygon points="500,250 505,566 612,560" fill="url(#paperB)"/>
+      <!-- neck -->
+      <polygon points="606,556 726,442 676,520" fill="url(#paperB)"/>
+      <!-- head -->
+      <polygon points="726,442 690,500 666,470" fill="url(#paperA)"/>
+      <!-- beak -->
+      <polygon points="726,444 784,456 724,470" fill="url(#beak)" stroke="none"/>
+    </g>
+  </g>
+</svg>
