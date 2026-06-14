@@ -73,6 +73,9 @@ body {
   -webkit-app-region: drag;
 }
 .titlebar > * { -webkit-app-region: no-drag; }
+/* Windows 无红绿灯，去掉左侧留白；关闭键贴最右。 */
+.titlebar.win { padding-left: 16px; }
+.win-close:hover { background: #e81123 !important; border-color: #e81123 !important; color: #fff !important; }
 .titlebar .title {
   font-weight: 600;
   font-size: 13px;

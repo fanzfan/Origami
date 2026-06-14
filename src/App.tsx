@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, ArchiveInfo, newJobId, Progress } from "./api";
@@ -72,6 +73,8 @@ export default function App() {
   // ----- settings: persist + apply (zoom + font)，外加平台习惯的快捷键 -----
   // Mac 用 Cmd，Windows/Linux 用 Ctrl，和绝大多数应用一致。
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
+  // Windows 隐藏原生标题栏，窗口控制（仅关闭）内嵌到自绘标题栏。
+  const isWin = navigator.userAgent.includes("Windows") || navigator.platform.startsWith("Win");
   useEffect(() => {
     applySettings(settings);
     saveSettings(settings);
@@ -472,17 +475,19 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="titlebar">
-        <span className="title">{title}</span>
-        <span style={{ flex: 1 }} />
+      <div className={`titlebar${isWin ? " win" : ""}`} data-tauri-drag-region>
+        <span className="title" data-tauri-drag-region>{title}</span>
+        <span style={{ flex: 1 }} data-tauri-drag-region />
         {archivePath && (
           <button className="btn ghost sm" onClick={closeArchive}>
             ✕ 关闭归档
           </button>
         )}
-        <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
-          🧩
-        </button>
+        {!isWin && (
+          <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
+            🧩
+          </button>
+        )}
         <button className="btn ghost sm" onClick={() => setShowAssoc(true)} title="文件关联">
           🔗
         </button>
@@ -492,6 +497,11 @@ export default function App() {
         <button className="btn ghost sm" onClick={() => setShowSettings(true)} title={isMac ? "设置 (⌘,)" : "设置 (Ctrl+,)"}>
           <span style={{ fontSize: "1.2em", lineHeight: 1 }}>⚙️</span>
         </button>
+        {isWin && (
+          <button className="btn ghost sm win-close" onClick={() => getCurrentWindow().close()} title="关闭">
+            ✕
+          </button>
+        )}
       </div>
 
       {info && archivePath ? (
