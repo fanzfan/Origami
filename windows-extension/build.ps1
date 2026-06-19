@@ -17,7 +17,9 @@ param(
   # 额外产出一个「签名的 .msix 文件」到此路径（稀疏包，便于归档/分发）。
   # 注意：稀疏包仍需以 Add-AppxPackage -ExternalLocation 安装，且证书要被信任，
   # 不能双击直接装；本仓库的开发安装走下面的 -Register 流程。
-  [string] $PackMsixTo
+  [string] $PackMsixTo,
+  # 只构建/打包，不向系统注册（一键构建脚本用，避免改动系统、免 Dev Mode/管理员）。
+  [switch] $SkipRegister
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,16 +38,19 @@ Write-Host "› 复制 DLL 到应用目录：$AppDir"
 Copy-Item $dll "$AppDir/origami_explorer_command.dll" -Force
 Copy-Item "$here/AppxManifest.xml" "$AppDir/AppxManifest.xml" -Force
 
-# Assets：稀疏包要求存在 Logo 资源。没有就用 Origami 的图标占位。
+# Assets：稀疏包要求存在 Logo 资源。优先用仓库内的真实图标（src-tauri/icons），
+# 找不到再退化为复制 AppDir 里任一 png 占位。
 $assets = "$AppDir/Assets"
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
+$repoIcons = Resolve-Path "$here/../src-tauri/icons" -ErrorAction SilentlyContinue
 foreach ($n in @("StoreLogo.png","Square150x150Logo.png","Square44x44Logo.png")) {
-  if (-not (Test-Path "$assets/$n")) {
-    if (Test-Path "$AppDir/Origami.exe") {
-      # 占位：复制任一已有 png；正式分发请放真实图标。
-      $src = Get-ChildItem "$AppDir" -Filter *.png -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-      if ($src) { Copy-Item $src.FullName "$assets/$n" -Force }
-    }
+  if (Test-Path "$assets/$n") { continue }
+  if ($repoIcons -and (Test-Path "$repoIcons/$n")) {
+    Copy-Item "$repoIcons/$n" "$assets/$n" -Force
+  } else {
+    # 占位：复制任一已有 png；正式分发请放真实图标。
+    $src = Get-ChildItem "$AppDir" -Filter *.png -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($src) { Copy-Item $src.FullName "$assets/$n" -Force }
   }
 }
 
@@ -92,6 +97,12 @@ if ($PackMsixTo) {
   if ($LASTEXITCODE -ne 0) { throw "signtool 签名失败。" }
   Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
   Write-Host "✓ 已生成签名 .msix：$PackMsixTo"
+}
+
+if ($SkipRegister) {
+  Write-Host ""
+  Write-Host "✓ 已跳过注册（-SkipRegister）。DLL/清单/Assets 已就位于：$AppDir"
+  return
 }
 
 # 以「外部位置」方式注册稀疏包（开发模式，无需打成 .msix）。
