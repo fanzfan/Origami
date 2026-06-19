@@ -1,6 +1,6 @@
-use open_bandizip_lib::archive::create::{create, CreateOptions};
-use open_bandizip_lib::archive::extract::{extract, test_archive, Ctx, ExtractOptions};
-use open_bandizip_lib::archive::list::{list, ListOptions};
+use origami_lib::archive::create::{create, CreateOptions};
+use origami_lib::archive::extract::{extract, test_archive, Ctx, ExtractOptions};
+use origami_lib::archive::list::{list, ListOptions};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -250,7 +250,7 @@ fn volume_split_and_preview() {
         &create_opts("zip", None),
     )
     .unwrap();
-    let pv = open_bandizip_lib::archive::preview::preview_entry(&dest2, "hello.txt", None, vec![], "auto").unwrap();
+    let pv = origami_lib::archive::preview::preview_entry(&dest2, "hello.txt", None, vec![], "auto").unwrap();
     assert_eq!(pv.kind, "text");
     assert!(pv.text.unwrap().contains("预览内容"));
 }
@@ -270,7 +270,7 @@ fn sevenz_method_roundtrips() {
 }
 
 fn edit_roundtrip(format: &str, ext: &str, password: Option<&str>) {
-    use open_bandizip_lib::archive::edit::{add_files, remove_entries, EditOptions};
+    use origami_lib::archive::edit::{add_files, remove_entries, EditOptions};
     let app = tauri::test::mock_app();
     let handle = app.handle();
     let tmp = tempfile::tempdir().unwrap();
