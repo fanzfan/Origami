@@ -236,6 +236,10 @@ export default function App() {
   const draining = useRef(false);
   const drainActions = useCallback(async () => {
     if (draining.current) return; // 进行中的循环会在下一轮取走新动作
+    // 冷启动快捷压缩时主窗是隐藏的——此时由「可见」的迷你窗驱动并显示进度，
+    // 主窗不参与，以免和迷你窗争抢同一批动作（takePendingActions 是破坏性取走）。
+    // 主窗可见（应用已打开时右键压缩 / 打开归档）才在此处理，用应用内进度。
+    if (!(await getCurrentWindow().isVisible().catch(() => true))) return;
     draining.current = true;
     try {
       for (;;) {
@@ -274,8 +278,10 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     (async () => {
       unlisten = await api.onDeepLink(drainActions);
-      await drainActions();
+      // 先让 frontend_ready 决定是否显示主窗（非快捷启动会显示），再 drain：
+      // drainActions 仅在主窗可见时驱动，顺序保证可见后才取动作，避免漏处理。
       await api.frontendReady();
+      await drainActions();
     })();
     return () => unlisten?.();
   }, [drainActions]);

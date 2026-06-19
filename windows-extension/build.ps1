@@ -13,7 +13,11 @@
 
 param(
   [Parameter(Mandatory = $true)] [string] $AppDir,
-  [string] $CertSubject = "CN=Origami Local Signing"
+  [string] $CertSubject = "CN=Origami Local Signing",
+  # 额外产出一个「签名的 .msix 文件」到此路径（稀疏包，便于归档/分发）。
+  # 注意：稀疏包仍需以 Add-AppxPackage -ExternalLocation 安装，且证书要被信任，
+  # 不能双击直接装；本仓库的开发安装走下面的 -Register 流程。
+  [string] $PackMsixTo
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +62,36 @@ if (-not $cert) {
   Export-Certificate -Cert $cert -FilePath $tmp | Out-Null
   Import-Certificate -FilePath $tmp -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" | Out-Null
   Remove-Item $tmp -Force
+}
+
+# 可选：打成一个签名的 .msix 文件（稀疏包，含清单 + DLL + Assets，exe 为外部内容）。
+if ($PackMsixTo) {
+  # 从 Windows SDK 找 makeappx / signtool（取版本号最高的一份）。
+  function Find-SdkTool($name) {
+    Get-ChildItem "C:/Program Files (x86)/Windows Kits/10/bin" -Filter $name -Recurse -ErrorAction SilentlyContinue |
+      Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+  }
+  $makeappx = Find-SdkTool "makeappx.exe"
+  $signtool = Find-SdkTool "signtool.exe"
+  if (-not $makeappx -or -not $signtool) { throw "未找到 makeappx/signtool，请安装 Windows SDK。" }
+
+  # 只打包扩展负载（清单 + DLL + Assets），不含 Origami.exe（它是外部内容）。
+  $stage = Join-Path $env:TEMP "origami-msix-stage"
+  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force -Path "$stage/Assets" | Out-Null
+  Copy-Item "$here/AppxManifest.xml" "$stage/AppxManifest.xml" -Force
+  Copy-Item $dll "$stage/origami_explorer_command.dll" -Force
+  Copy-Item "$AppDir/Assets/*" "$stage/Assets/" -Force
+
+  New-Item -ItemType Directory -Force -Path (Split-Path $PackMsixTo) | Out-Null
+  Write-Host "› 打包 .msix：$PackMsixTo"
+  & $makeappx pack /d $stage /p $PackMsixTo /o /nv
+  if ($LASTEXITCODE -ne 0) { throw "makeappx 打包失败。" }
+  Write-Host "› 用 $CertSubject 签名 .msix…"
+  & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /t http://timestamp.digicert.com $PackMsixTo
+  if ($LASTEXITCODE -ne 0) { throw "signtool 签名失败。" }
+  Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Host "✓ 已生成签名 .msix：$PackMsixTo"
 }
 
 # 以「外部位置」方式注册稀疏包（开发模式，无需打成 .msix）。
