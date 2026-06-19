@@ -6,8 +6,8 @@ fn finder_workflows_are_valid_plists() {
     std::env::set_var("HOME", tmp.path());
     std::env::set_var("ORIGAMI_NO_FINDER_RESTART", "1");
 
-    open_bandizip_lib::services::install().unwrap();
-    assert!(open_bandizip_lib::services::installed());
+    origami_lib::services::install().unwrap();
+    assert!(origami_lib::services::installed());
 
     let dir = tmp.path().join("Library/Services");
     let workflows: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -31,6 +31,6 @@ fn finder_workflows_are_valid_plists() {
         assert!(wflow.contains("runWorkflowAsService") || wf.join("Contents/Info.plist").exists());
     }
 
-    open_bandizip_lib::services::uninstall().unwrap();
-    assert!(!open_bandizip_lib::services::installed());
+    origami_lib::services::uninstall().unwrap();
+    assert!(!origami_lib::services::installed());
 }
