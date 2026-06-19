@@ -82,12 +82,17 @@ pub(crate) fn collect_sources(
                 })
             {
                 let entry = entry?;
+                // 归档条目名必须用「/」分隔。直接 to_string_lossy 在 Windows 上会保留
+                // 反斜杠（如 sub\file），导致条目名非法、其它工具解压时层级错乱。
+                // 按路径分量重组，平台无关地拼成正斜杠路径。
                 let rel_inner = entry
                     .path()
                     .strip_prefix(p)
                     .unwrap()
-                    .to_string_lossy()
-                    .to_string();
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
                 let rel = if rel_inner.is_empty() {
                     base_name.clone()
                 } else {

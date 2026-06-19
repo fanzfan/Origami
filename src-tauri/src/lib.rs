@@ -101,16 +101,42 @@ fn dispatch_actions(app: &tauri::AppHandle, actions: Vec<PendingAction>) {
         .as_ref()
         .map(|w| w.is_visible().unwrap_or(false))
         .unwrap_or(false);
+    // 先入队，确保驱动方（迷你窗或主窗）取走时动作已就绪。
+    app.state::<Arc<Pending>>().0.lock().unwrap().extend(actions);
     if all_quick && !main_visible {
         app.state::<Arc<QuickLaunch>>()
             .0
             .store(true, Ordering::Relaxed);
+        // 由「可见」的迷你窗驱动整条快捷压缩流程：迷你窗的 WebView2 必然初始化并跑 JS，
+        // 而隐藏的主窗在部分平台（Windows WebView2）可能延迟创建 webview、不跑 JS，
+        // 因此不能依赖隐藏主窗发起任务。见 MiniProgress.tsx。
+        let _ = spawn_mini_window(app);
     } else if let Some(w) = main {
         let _ = w.show();
         let _ = w.set_focus();
     }
-    app.state::<Arc<Pending>>().0.lock().unwrap().extend(actions);
     let _ = app.emit("deep-link-available", ());
+}
+
+/// 创建快捷压缩用的迷你进度窗口（可见，其 WebView2 会正常初始化并跑 JS）。
+/// 已存在则不重复创建。
+fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if app.get_webview_window("mini").is_some() {
+        return Ok(());
+    }
+    let r = tauri::WebviewWindowBuilder::new(
+        app,
+        "mini",
+        tauri::WebviewUrl::App("index.html?mini=1".into()),
+    )
+    .title("Origami")
+    .inner_size(420.0, 148.0)
+    .resizable(false)
+    .always_on_top(true)
+    .center()
+    .build();
+    r.map(|_| ()).map_err(|e| e.to_string())
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -638,20 +664,7 @@ fn begin_quick_job(app: tauri::AppHandle) -> CmdResult<bool> {
     if main_visible {
         return Ok(false);
     }
-    if app.get_webview_window("mini").is_none() {
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            "mini",
-            tauri::WebviewUrl::App("index.html?mini=1".into()),
-        )
-        .title("Origami")
-        .inner_size(420.0, 148.0)
-        .resizable(false)
-        .always_on_top(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
-    }
+    spawn_mini_window(&app)?;
     Ok(true)
 }
 
@@ -717,7 +730,6 @@ pub fn run() {
             // 首次启动若带参数（Windows/Linux 关联打开或右键压缩），在此投递。
             #[cfg(not(target_os = "macos"))]
             {
-                use tauri::Manager;
                 let args: Vec<String> = std::env::args().skip(1).collect();
                 let actions = cli::parse_args(&args);
                 dispatch_actions(app.handle(), actions);
