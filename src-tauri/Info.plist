@@ -29,6 +29,25 @@
   -->
   <key>CFBundleDocumentTypes</key>
   <array>
+    <!--
+      catch-all：声明可「查看」任意文件 / 文件夹，使其能被拖到 Dock 图标上（否则
+      macOS 只把已声明的归档类型投递给应用）。拖入后走 RunEvent::Opened → 前端按
+      「单个归档=打开，其它=压缩」处理。LSHandlerRank=Alternate 保证不会成为各类
+      文件的默认打开程序，只是出现在「打开方式」里并接受 Dock 拖放。
+    -->
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>任意文件或文件夹（拖入以压缩）</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.item</string>
+        <string>public.folder</string>
+      </array>
+    </dict>
     <dict>
       <key>CFBundleTypeName</key>
       <string>ZIP 压缩文件</string>
