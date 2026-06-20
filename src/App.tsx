@@ -272,8 +272,13 @@ export default function App() {
         const quick: { format: string; paths: string[] }[] = [];
         for (const a of actions) {
           if (a.kind === "open") {
-            const arc = a.paths.find(isArchive);
-            if (arc) openArchive(arc);
+            // 与窗口内拖放一致：单个归档 → 打开；其它（普通文件 / 文件夹 / 多个文件，
+            // 例如拖到 Dock 图标或 Windows 快捷方式上）→ 进入压缩。
+            if (a.paths.length === 1 && isArchive(a.paths[0])) {
+              openArchive(a.paths[0]);
+            } else if (a.paths.length > 0) {
+              setCreateFor(a.paths);
+            }
           } else if (a.format === "ask") {
             setCreateFor(a.paths);
           } else {
