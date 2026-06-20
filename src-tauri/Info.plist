@@ -15,5 +15,110 @@
       <string>Viewer</string>
     </dict>
   </array>
+
+  <!--
+    压缩包按格式区分的访达图标。每种格式一个文档类型，CFBundleTypeIconFile 指向
+    Resources 根目录下的 {ext}.icns（由 tauri.conf.json 的 bundle.resources 拍平分发，
+    .icns 由 make_filetype_icons.py 生成）。用扩展名匹配（CFBundleTypeExtensions）而非
+    UTI，避免 xz/zst 等无 Apple 标准 UTI 的格式无法绑定。
+
+    说明：tauri.conf.json 的 fileAssociations 也会让 Tauri 生成一份基于 UTI 的
+    CFBundleDocumentTypes（用应用主图标）。本文件由 Tauri 合并进最终 Info.plist。
+    需在 macOS 上实测：确认访达对各扩展名显示对应彩色图标，且关联/打开行为正常；
+    若出现重复文档类型导致图标不生效，再改为移除 fileAssociations 的扩展名、以此处为准。
+  -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>ZIP 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>zip</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>zip</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>7-Zip 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>7z</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>7z</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>RAR 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>rar</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>rar</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>TAR 归档文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>tar</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>tar</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Gzip 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>gz</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>gz</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Gzip TAR 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>tgz</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>tgz</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Bzip2 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>bz2</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>bz2</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>XZ 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>xz</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>xz</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Zstandard 压缩文件</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>zst</string>
+      <key>CFBundleTypeExtensions</key>
+      <array><string>zst</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>

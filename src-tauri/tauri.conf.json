@@ -33,6 +33,26 @@
     "active": true,
     "targets": ["app", "dmg", "nsis"],
     "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
+    "resources": {
+      "icons/filetypes/zip.ico": "icons/filetypes/zip.ico",
+      "icons/filetypes/7z.ico": "icons/filetypes/7z.ico",
+      "icons/filetypes/rar.ico": "icons/filetypes/rar.ico",
+      "icons/filetypes/tar.ico": "icons/filetypes/tar.ico",
+      "icons/filetypes/gz.ico": "icons/filetypes/gz.ico",
+      "icons/filetypes/tgz.ico": "icons/filetypes/tgz.ico",
+      "icons/filetypes/bz2.ico": "icons/filetypes/bz2.ico",
+      "icons/filetypes/xz.ico": "icons/filetypes/xz.ico",
+      "icons/filetypes/zst.ico": "icons/filetypes/zst.ico",
+      "icons/filetypes/zip.icns": "zip.icns",
+      "icons/filetypes/7z.icns": "7z.icns",
+      "icons/filetypes/rar.icns": "rar.icns",
+      "icons/filetypes/tar.icns": "tar.icns",
+      "icons/filetypes/gz.icns": "gz.icns",
+      "icons/filetypes/tgz.icns": "tgz.icns",
+      "icons/filetypes/bz2.icns": "bz2.icns",
+      "icons/filetypes/xz.icns": "xz.icns",
+      "icons/filetypes/zst.icns": "zst.icns"
+    },
     "fileAssociations": [
       {
         "ext": ["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst"],
