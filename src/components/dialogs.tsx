@@ -426,10 +426,17 @@ export function PasswordManager(p: { onClose: () => void }) {
   const [newLabel, setNewLabel] = useState("");
   const [reveal, setReveal] = useState(false);
   const [phase, setPhase] = useState<AuthPhase>("checking");
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  // 正在拖动的条目 id（仅用于样式）。
+  const [dragId, setDragId] = useState<string | null>(null);
 
   // 列表只取元数据，不读凭据库（打开管理器不会弹钥匙串）。
   const refresh = () => api.pwList().then(setList);
+
+  // 拖动排序用：实时镜像最新 list（供拖放结束时持久化）与每行 DOM（供命中测试）。
+  const listRef = useRef<PwMeta[]>([]);
+  listRef.current = list;
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const dragIdRef = useRef<string | null>(null);
 
   // 勾选「显示密码」时再加载明文；取消则清空（不缓存明文）。
   const toggleReveal = async (on: boolean) => {
@@ -451,16 +458,47 @@ export function PasswordManager(p: { onClose: () => void }) {
     if (reveal) toggleReveal(true);
   };
 
-  // 拖动到目标行后：本地立刻重排，再把新顺序（按 id）持久化到后端。
-  const dropAt = async (toIdx: number) => {
-    if (dragIdx === null || dragIdx === toIdx) return setDragIdx(null);
-    const next = [...list];
-    const [moved] = next.splice(dragIdx, 1);
-    next.splice(toIdx, 0, moved);
-    setDragIdx(null);
-    setList(next);
-    await api.pwReorder(next.map((e) => e.id));
-    refresh();
+  // 拖动排序：用鼠标事件实现（WKWebView 对 HTML5 拖放支持不可靠，故不依赖 draggable）。
+  // 拖动时按各行垂直中点做命中测试，实时重排；松手后把新顺序持久化。
+  const startDrag = (id: string, e: React.MouseEvent) => {
+    e.preventDefault(); // 阻止文本选中
+    dragIdRef.current = id;
+    setDragId(id);
+
+    const onMove = (ev: MouseEvent) => {
+      const dragging = dragIdRef.current;
+      if (!dragging) return;
+      setList((cur) => {
+        const from = cur.findIndex((x) => x.id === dragging);
+        if (from < 0) return cur;
+        let to = cur.length - 1;
+        for (let i = 0; i < cur.length; i++) {
+          const el = rowRefs.current[cur[i].id];
+          if (!el) continue;
+          const r = el.getBoundingClientRect();
+          if (ev.clientY < r.top + r.height / 2) {
+            to = i;
+            break;
+          }
+        }
+        if (to === from) return cur;
+        const next = [...cur];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      dragIdRef.current = null;
+      setDragId(null);
+      api.pwReorder(listRef.current.map((x) => x.id)).then(refresh);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   };
 
   const authenticate = async () => {
@@ -562,20 +600,19 @@ export function PasswordManager(p: { onClose: () => void }) {
       </label>
       <div className="pwlist">
         {list.length === 0 && <div className="hint">还没有保存的密码</div>}
-        {list.map((e, i) => (
+        {list.map((e) => (
           <div
-            className={`pw-item${dragIdx === i ? " dragging" : ""}`}
+            className={`pw-item${dragId === e.id ? " dragging" : ""}`}
             key={e.id}
-            onDragOver={(ev) => ev.preventDefault()}
-            onDrop={() => dropAt(i)}
+            ref={(el) => {
+              rowRefs.current[e.id] = el;
+            }}
           >
             <span
               className="drag-handle"
               title="拖动调整顺序"
               aria-label="拖动调整顺序"
-              draggable
-              onDragStart={() => setDragIdx(i)}
-              onDragEnd={() => setDragIdx(null)}
+              onMouseDown={(ev) => startDrag(e.id, ev)}
             >
               ⇅
             </span>
