@@ -102,6 +102,7 @@ export const api = {
   pwList: () => invoke<SavedPassword[]>("pw_list"),
   pwAdd: (password: string, label?: string) => invoke<void>("pw_add", { password, label }),
   pwRemove: (password: string) => invoke<void>("pw_remove", { password }),
+  pwReorder: (passwords: string[]) => invoke<void>("pw_reorder", { passwords }),
 
   systemAuthAvailable: () => invoke<boolean>("system_auth_available"),
   systemAuth: (reason: string) => invoke<boolean>("system_auth", { reason }),

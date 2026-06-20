@@ -150,9 +150,20 @@ pub fn mark_used(app: &tauri::AppHandle, password: &str) {
     }
 }
 
-/// 候选密码，最近使用优先。
+/// 按用户给定的明文顺序重排索引；未列出的条目保持相对顺序追加到末尾。
+pub fn reorder(app: &tauri::AppHandle, order: &[String]) -> anyhow::Result<()> {
+    let mut idx = load_index(app);
+    migrate(app, &mut idx);
+    let rank = |e: &IndexEntry| {
+        kr_get(&e.id)
+            .and_then(|pw| order.iter().position(|o| o == &pw))
+            .unwrap_or(usize::MAX)
+    };
+    idx.sort_by_key(rank);
+    save_index(app, &idx)
+}
+
+/// 候选密码，按列表（用户可拖动调整的）顺序尝试。
 pub fn candidates(app: &tauri::AppHandle) -> Vec<String> {
-    let mut list = load(app);
-    list.sort_by_key(|e| std::cmp::Reverse(e.last_used.unwrap_or(e.added_at)));
-    list.into_iter().map(|e| e.password).collect()
+    load(app).into_iter().map(|e| e.password).collect()
 }
