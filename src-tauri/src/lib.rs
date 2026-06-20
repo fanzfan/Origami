@@ -404,6 +404,11 @@ fn pw_remove(app: tauri::AppHandle, password: String) -> CmdResult<()> {
     passwords::remove(&app, &password).map_err(err_str)
 }
 
+#[tauri::command]
+fn pw_reorder(app: tauri::AppHandle, passwords: Vec<String>) -> CmdResult<()> {
+    passwords::reorder(&app, &passwords).map_err(err_str)
+}
+
 /// 当前平台是否提供可用的系统级身份验证（Touch ID / Windows Hello / 登录密码）。
 #[tauri::command]
 fn system_auth_available() -> bool {
@@ -866,6 +871,7 @@ pub fn run() {
             pw_list,
             pw_add,
             pw_remove,
+            pw_reorder,
             system_auth_available,
             system_auth,
             extract_entry_to_temp,

@@ -424,8 +424,29 @@ export function PasswordManager(p: { onClose: () => void }) {
   const [newLabel, setNewLabel] = useState("");
   const [reveal, setReveal] = useState(false);
   const [phase, setPhase] = useState<AuthPhase>("checking");
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   const refresh = () => api.pwList().then(setList);
+
+  const addPassword = async () => {
+    if (!newPw) return;
+    await api.pwAdd(newPw, newLabel || undefined);
+    setNewPw("");
+    setNewLabel("");
+    refresh();
+  };
+
+  // 拖动到目标行后：本地立刻重排，再把新顺序持久化到后端。
+  const dropAt = async (toIdx: number) => {
+    if (dragIdx === null || dragIdx === toIdx) return setDragIdx(null);
+    const next = [...list];
+    const [moved] = next.splice(dragIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setDragIdx(null);
+    setList(next);
+    await api.pwReorder(next.map((e) => e.password));
+    refresh();
+  };
 
   const authenticate = async () => {
     setPhase("checking");
@@ -489,21 +510,34 @@ export function PasswordManager(p: { onClose: () => void }) {
       footer={<button className="btn primary" onClick={p.onClose}>完成</button>}
     >
       <p className="hint" style={{ margin: 0 }}>
-        打开或解压加密归档时，会自动按最近使用顺序尝试这些密码。
+        打开或解压加密归档时，会按下面的列表顺序尝试这些密码；可拖动左侧 ⇅ 调整顺序。
       </p>
       <div className="row">
-        <input type={reveal ? "text" : "password"} placeholder="新密码" value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-        <input type="text" placeholder="备注（可选）" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} />
-        <button
-          className="btn"
-          disabled={!newPw}
-          onClick={async () => {
-            await api.pwAdd(newPw, newLabel || undefined);
-            setNewPw("");
-            setNewLabel("");
-            refresh();
+        <input
+          type={reveal ? "text" : "password"}
+          placeholder="新密码"
+          value={newPw}
+          onChange={(e) => setNewPw(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addPassword();
+            }
           }}
-        >
+        />
+        <input
+          type="text"
+          placeholder="备注（可选）"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addPassword();
+            }
+          }}
+        />
+        <button className="btn" disabled={!newPw} onClick={addPassword}>
           添加
         </button>
       </div>
@@ -513,8 +547,23 @@ export function PasswordManager(p: { onClose: () => void }) {
       </label>
       <div className="pwlist">
         {list.length === 0 && <div className="hint">还没有保存的密码</div>}
-        {list.map((e) => (
-          <div className="pw-item" key={e.password}>
+        {list.map((e, i) => (
+          <div
+            className={`pw-item${dragIdx === i ? " dragging" : ""}`}
+            key={e.password}
+            onDragOver={(ev) => ev.preventDefault()}
+            onDrop={() => dropAt(i)}
+          >
+            <span
+              className="drag-handle"
+              title="拖动调整顺序"
+              aria-label="拖动调整顺序"
+              draggable
+              onDragStart={() => setDragIdx(i)}
+              onDragEnd={() => setDragIdx(null)}
+            >
+              ⇅
+            </span>
             <code>{reveal ? e.password : "•".repeat(Math.min(e.password.length, 12))}</code>
             {e.label && <span className="label">{e.label}</span>}
             <button
