@@ -216,7 +216,6 @@ export default function App() {
           excludeJunk: settings.excludeJunk,
         });
         toast("ok", `压缩完成：${out.split("/").pop()}`);
-        revealItemInDir(out).catch(() => {});
         return true;
       } catch (e) {
         const msg = String(e);
@@ -366,9 +365,8 @@ export default function App() {
       setCreateFor(null);
       setJob({ jobId, title: "正在压缩…", progress: null });
       try {
-        const out = await api.createArchive({ jobId, sources, excludeJunk: settings.excludeJunk, ...p });
+        await api.createArchive({ jobId, sources, excludeJunk: settings.excludeJunk, ...p });
         toast("ok", "压缩完成");
-        revealItemInDir(out).catch(() => {});
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", "已取消");

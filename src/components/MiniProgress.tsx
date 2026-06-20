@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, Progress } from "../api";
 import { loadSettings } from "../settings";
 
@@ -43,13 +42,12 @@ export function MiniProgress() {
       }
       let ok = true;
       let lastErr = "";
-      let lastOut = "";
       for (const a of quick) {
         const jobId = newJobId();
         jobRef.current = jobId;
         try {
           const dest = await api.defaultCreateDest(a.paths, a.format);
-          lastOut = await api.createArchive({
+          await api.createArchive({
             jobId,
             dest,
             sources: a.paths,
@@ -67,8 +65,8 @@ export function MiniProgress() {
       }
       if (ok) {
         setDone(true);
-        if (lastOut) revealItemInDir(lastOut).catch(() => {});
-        // 让 100% 完成态停留一瞬再退出。
+        // 不再自动「在资源管理器中显示」：右键快捷压缩时用户本就在源文件夹，
+        // 产物就在同一目录，再弹新窗口反而打扰。
         await new Promise((r) => setTimeout(r, 800));
       } else {
         setError(lastErr || "压缩失败");
