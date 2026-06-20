@@ -38,11 +38,18 @@ export interface Preview {
   size: number;
 }
 
-export interface SavedPassword {
-  password: string;
+// 列表元数据：不含明文（读取它不会触碰系统凭据库）。
+export interface PwMeta {
+  id: string;
   label: string | null;
-  added_at: number;
-  last_used: number | null;
+  addedAt: number;
+  lastUsed: number | null;
+}
+
+// 显示明文时按需返回。
+export interface RevealedPassword {
+  id: string;
+  password: string;
 }
 
 export const api = {
@@ -99,10 +106,11 @@ export const api = {
   systemIcon: (ext: string, isDir: boolean) =>
     invoke<string | null>("system_icon", { ext, isDir }),
 
-  pwList: () => invoke<SavedPassword[]>("pw_list"),
+  pwList: () => invoke<PwMeta[]>("pw_list"),
+  pwReveal: () => invoke<RevealedPassword[]>("pw_reveal"),
   pwAdd: (password: string, label?: string) => invoke<void>("pw_add", { password, label }),
-  pwRemove: (password: string) => invoke<void>("pw_remove", { password }),
-  pwReorder: (passwords: string[]) => invoke<void>("pw_reorder", { passwords }),
+  pwRemove: (id: string) => invoke<void>("pw_remove", { id }),
+  pwReorder: (ids: string[]) => invoke<void>("pw_reorder", { ids }),
 
   systemAuthAvailable: () => invoke<boolean>("system_auth_available"),
   systemAuth: (reason: string) => invoke<boolean>("system_auth", { reason }),

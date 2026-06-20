@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, AssocEntry, fmtDate, fmtSize, Preview, SavedPassword } from "../api";
+import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
 import type { JobState } from "../App";
 import { FONTS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
@@ -419,14 +419,28 @@ export function PasswordPrompt(p: { onSubmit: (pw: string | null) => void }) {
 type AuthPhase = "checking" | "ready" | "denied";
 
 export function PasswordManager(p: { onClose: () => void }) {
-  const [list, setList] = useState<SavedPassword[]>([]);
+  const [list, setList] = useState<PwMeta[]>([]);
+  // 明文按需加载：id -> 明文。仅当用户勾选「显示密码」时才向后端索取（届时才读凭据库）。
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [newPw, setNewPw] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [reveal, setReveal] = useState(false);
   const [phase, setPhase] = useState<AuthPhase>("checking");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
+  // 列表只取元数据，不读凭据库（打开管理器不会弹钥匙串）。
   const refresh = () => api.pwList().then(setList);
+
+  // 勾选「显示密码」时再加载明文；取消则清空（不缓存明文）。
+  const toggleReveal = async (on: boolean) => {
+    setReveal(on);
+    if (on) {
+      const revealed = await api.pwReveal();
+      setSecrets(Object.fromEntries(revealed.map((r) => [r.id, r.password])));
+    } else {
+      setSecrets({});
+    }
+  };
 
   const addPassword = async () => {
     if (!newPw) return;
@@ -434,9 +448,10 @@ export function PasswordManager(p: { onClose: () => void }) {
     setNewPw("");
     setNewLabel("");
     refresh();
+    if (reveal) toggleReveal(true);
   };
 
-  // 拖动到目标行后：本地立刻重排，再把新顺序持久化到后端。
+  // 拖动到目标行后：本地立刻重排，再把新顺序（按 id）持久化到后端。
   const dropAt = async (toIdx: number) => {
     if (dragIdx === null || dragIdx === toIdx) return setDragIdx(null);
     const next = [...list];
@@ -444,7 +459,7 @@ export function PasswordManager(p: { onClose: () => void }) {
     next.splice(toIdx, 0, moved);
     setDragIdx(null);
     setList(next);
-    await api.pwReorder(next.map((e) => e.password));
+    await api.pwReorder(next.map((e) => e.id));
     refresh();
   };
 
@@ -542,7 +557,7 @@ export function PasswordManager(p: { onClose: () => void }) {
         </button>
       </div>
       <label className="row" style={{ gap: 8 }}>
-        <input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} style={{ width: "auto" }} />
+        <input type="checkbox" checked={reveal} onChange={(e) => toggleReveal(e.target.checked)} style={{ width: "auto" }} />
         <span className="hint">显示密码</span>
       </label>
       <div className="pwlist">
@@ -550,7 +565,7 @@ export function PasswordManager(p: { onClose: () => void }) {
         {list.map((e, i) => (
           <div
             className={`pw-item${dragIdx === i ? " dragging" : ""}`}
-            key={e.password}
+            key={e.id}
             onDragOver={(ev) => ev.preventDefault()}
             onDrop={() => dropAt(i)}
           >
@@ -564,12 +579,12 @@ export function PasswordManager(p: { onClose: () => void }) {
             >
               ⇅
             </span>
-            <code>{reveal ? e.password : "•".repeat(Math.min(e.password.length, 12))}</code>
+            <code>{reveal ? (secrets[e.id] ?? "") : "••••••••"}</code>
             {e.label && <span className="label">{e.label}</span>}
             <button
               className="btn sm danger"
               onClick={async () => {
-                await api.pwRemove(e.password);
+                await api.pwRemove(e.id);
                 refresh();
               }}
             >

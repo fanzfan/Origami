@@ -389,24 +389,42 @@ async fn system_icon(_ext: String, _is_dir: bool) -> Option<String> {
     None
 }
 
+// 凭据库读写可能阻塞（macOS 钥匙串会弹系统框），全部放到 spawn_blocking，避免卡住 UI 线程。
+async fn pw_blocking<T, F>(app: tauri::AppHandle, f: F) -> CmdResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&tauri::AppHandle) -> CmdResult<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || f(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// 列表（仅元数据，不读凭据库——打开密码管理器不会弹钥匙串）。
 #[tauri::command]
-fn pw_list(app: tauri::AppHandle) -> Vec<passwords::SavedPassword> {
-    passwords::load(&app)
+async fn pw_list(app: tauri::AppHandle) -> CmdResult<Vec<passwords::PwMeta>> {
+    pw_blocking(app, |a| Ok(passwords::list_meta(a))).await
+}
+
+/// 显示明文（用户主动「显示密码」时才读凭据库）。
+#[tauri::command]
+async fn pw_reveal(app: tauri::AppHandle) -> CmdResult<Vec<passwords::RevealedPassword>> {
+    pw_blocking(app, |a| Ok(passwords::reveal_all(a))).await
 }
 
 #[tauri::command]
-fn pw_add(app: tauri::AppHandle, password: String, label: Option<String>) -> CmdResult<()> {
-    passwords::add(&app, password, label).map_err(err_str)
+async fn pw_add(app: tauri::AppHandle, password: String, label: Option<String>) -> CmdResult<()> {
+    pw_blocking(app, move |a| passwords::add(a, password, label).map_err(err_str)).await
 }
 
 #[tauri::command]
-fn pw_remove(app: tauri::AppHandle, password: String) -> CmdResult<()> {
-    passwords::remove(&app, &password).map_err(err_str)
+async fn pw_remove(app: tauri::AppHandle, id: String) -> CmdResult<()> {
+    pw_blocking(app, move |a| passwords::remove(a, &id).map_err(err_str)).await
 }
 
 #[tauri::command]
-fn pw_reorder(app: tauri::AppHandle, passwords: Vec<String>) -> CmdResult<()> {
-    passwords::reorder(&app, &passwords).map_err(err_str)
+async fn pw_reorder(app: tauri::AppHandle, ids: Vec<String>) -> CmdResult<()> {
+    pw_blocking(app, move |a| passwords::reorder(a, &ids).map_err(err_str)).await
 }
 
 /// 当前平台是否提供可用的系统级身份验证（Touch ID / Windows Hello / 登录密码）。
@@ -869,6 +887,7 @@ pub fn run() {
             cancel_job,
             system_icon,
             pw_list,
+            pw_reveal,
             pw_add,
             pw_remove,
             pw_reorder,
