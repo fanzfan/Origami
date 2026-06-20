@@ -159,7 +159,8 @@ async fn list_archive(
     password: Option<String>,
     encoding: Option<String>,
 ) -> CmdResult<archive::ArchiveInfo> {
-    let fallbacks = passwords::candidates(&app);
+    // 惰性：只有归档确实加密、主密码失败需要回退时才会读凭据库（不会每次打开都弹钥匙串）。
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&app));
     tauri::async_runtime::spawn_blocking(move || {
         let opts = ListOptions {
             password,
@@ -185,7 +186,8 @@ async fn extract_archive(
     smart: Option<bool>,
 ) -> CmdResult<String> {
     let cancel = jobs.register(&job_id);
-    let fallbacks = passwords::candidates(&app);
+    let fb_app = app.clone();
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&fb_app));
     let jobs2 = jobs.inner().clone();
     let jid = job_id.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
@@ -327,7 +329,8 @@ async fn test_archive(
     password: Option<String>,
 ) -> CmdResult<()> {
     let cancel = jobs.register(&job_id);
-    let fallbacks = passwords::candidates(&app);
+    let fb_app = app.clone();
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&fb_app));
     let jobs2 = jobs.inner().clone();
     let jid = job_id.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {
@@ -349,7 +352,7 @@ async fn preview_entry(
     password: Option<String>,
     encoding: Option<String>,
 ) -> CmdResult<archive::preview::Preview> {
-    let fallbacks = passwords::candidates(&app);
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&app));
     tauri::async_runtime::spawn_blocking(move || {
         archive::preview::preview_entry(
             &PathBuf::from(path),
@@ -454,7 +457,8 @@ async fn extract_entry_to_temp(
     use tauri::Manager;
     let job_id = format!("open-{}", std::process::id());
     let cancel = jobs.register(&job_id);
-    let fallbacks = passwords::candidates(&app);
+    let fb_app = app.clone();
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&fb_app));
     let jobs2 = jobs.inner().clone();
     let jid = job_id.clone();
     let res = tauri::async_runtime::spawn_blocking(move || {

@@ -8,8 +8,8 @@ use std::path::Path;
 pub struct ListOptions {
     pub password: Option<String>,
     pub encoding: String,
-    /// Extra passwords to try if the provided one fails (saved password store).
-    pub fallback_passwords: Vec<String>,
+    /// 主密码失败时才惰性读取的已存密码（避免无谓地读凭据库 / 弹钥匙串）。
+    pub fallback_passwords: crate::passwords::LazyPasswords,
 }
 
 pub fn list(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
@@ -89,110 +89,115 @@ pub fn nt_to_unix(nt: u64) -> Option<i64> {
     Some(nt as i64 / 10_000_000 - 11_644_473_600)
 }
 
-fn list_7z(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
+/// 用单个密码尝试打开 7z：Ok(Some)=成功，Ok(None)=密码错误（可换下一个），Err=致命错误。
+fn try_list_7z(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<ArchiveInfo>> {
     use sevenz_rust2::{Archive, Password};
 
-    let mut tried: Vec<Option<String>> = vec![opts.password.clone()];
-    for p in &opts.fallback_passwords {
-        tried.push(Some(p.clone()));
-    }
-
-    let mut last_err: Option<anyhow::Error> = None;
-    for pw in tried {
-        let password = pw
-            .as_deref()
-            .map(Password::from)
-            .unwrap_or_else(Password::empty);
-        match Archive::open_with_password(path, &password) {
-            Ok(archive) => {
-                let mut info = empty_info();
-                info.used_password = pw;
-                for f in &archive.files {
-                    info.entries.push(Entry {
-                        path: f.name.replace('\\', "/"),
-                        size: f.size,
-                        compressed: f.compressed_size,
-                        is_dir: f.is_directory,
-                        mtime: nt_to_unix(f.last_modified_date.into()),
-                        encrypted: false,
-                        crc: if f.has_crc { Some(f.crc as u32) } else { None },
-                    });
-                }
-                // Detect encrypted content blocks.
-                let enc = archive.blocks.iter().any(|b| {
-                    b.coders
-                        .iter()
-                        .any(|c| c.encoder_method_id() == sevenz_rust2::EncoderMethod::ID_AES256_SHA256)
+    let password = pw.as_deref().map(Password::from).unwrap_or_else(Password::empty);
+    match Archive::open_with_password(path, &password) {
+        Ok(archive) => {
+            let mut info = empty_info();
+            info.used_password = pw.clone();
+            for f in &archive.files {
+                info.entries.push(Entry {
+                    path: f.name.replace('\\', "/"),
+                    size: f.size,
+                    compressed: f.compressed_size,
+                    is_dir: f.is_directory,
+                    mtime: nt_to_unix(f.last_modified_date.into()),
+                    encrypted: false,
+                    crc: if f.has_crc { Some(f.crc as u32) } else { None },
                 });
-                info.has_encrypted = enc;
-                if enc {
-                    for e in &mut info.entries {
-                        if !e.is_dir {
-                            e.encrypted = true;
-                        }
+            }
+            // Detect encrypted content blocks.
+            let enc = archive.blocks.iter().any(|b| {
+                b.coders
+                    .iter()
+                    .any(|c| c.encoder_method_id() == sevenz_rust2::EncoderMethod::ID_AES256_SHA256)
+            });
+            info.has_encrypted = enc;
+            if enc {
+                for e in &mut info.entries {
+                    if !e.is_dir {
+                        e.encrypted = true;
                     }
                 }
-                return Ok(info);
             }
-            Err(e) => {
-                let msg = format!("{e:?}");
-                if msg.contains("Password") || msg.contains("password") || msg.contains("Checksum")
-                {
-                    last_err = Some(anyhow::anyhow!("PASSWORD_REQUIRED"));
-                    continue;
-                }
-                return Err(anyhow::anyhow!("打开 7z 失败: {e}"));
+            Ok(Some(info))
+        }
+        Err(e) => {
+            let msg = format!("{e:?}");
+            if msg.contains("Password") || msg.contains("password") || msg.contains("Checksum") {
+                Ok(None)
+            } else {
+                Err(anyhow::anyhow!("打开 7z 失败: {e}"))
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("打开 7z 失败")))
+}
+
+fn list_7z(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
+    // 主密码（用户给的 / 无）优先；只有它失败才惰性读取已存密码。
+    if let Some(info) = try_list_7z(path, &opts.password)? {
+        return Ok(info);
+    }
+    for p in opts.fallback_passwords.get() {
+        if let Some(info) = try_list_7z(path, &Some(p.clone()))? {
+            return Ok(info);
+        }
+    }
+    Err(anyhow::anyhow!("PASSWORD_REQUIRED"))
+}
+
+/// 用单个密码尝试列出 RAR：Ok(Some)=成功，Ok(None)=密码错误，Err=致命错误。
+fn try_list_rar(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<ArchiveInfo>> {
+    let result = (|| -> Result<ArchiveInfo, unrar::error::UnrarError> {
+        let archive = match pw {
+            Some(p) => unrar::Archive::with_password(path, p),
+            None => unrar::Archive::new(path),
+        };
+        let mut open = archive.open_for_listing()?;
+        let mut info = empty_info();
+        info.used_password = pw.clone();
+        loop {
+            let Some(cursor) = open.read_header()? else { break };
+            let h = cursor.entry();
+            info.entries.push(Entry {
+                path: h.filename.to_string_lossy().replace('\\', "/"),
+                size: h.unpacked_size,
+                compressed: 0,
+                is_dir: cursor.entry().is_directory(),
+                mtime: dos_to_unix(h.file_time),
+                encrypted: cursor.entry().is_encrypted(),
+                crc: Some(h.file_crc),
+            });
+            open = cursor.skip()?;
+        }
+        Ok(info)
+    })();
+    match result {
+        Ok(info) => Ok(Some(info)),
+        Err(e) => {
+            use unrar::error::Code;
+            if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
+                Ok(None)
+            } else {
+                Err(anyhow::anyhow!("打开 RAR 失败: {:?}", e.code))
+            }
+        }
+    }
 }
 
 fn list_rar(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
-    let mut tried: Vec<Option<String>> = vec![opts.password.clone()];
-    for p in &opts.fallback_passwords {
-        tried.push(Some(p.clone()));
+    if let Some(info) = try_list_rar(path, &opts.password)? {
+        return Ok(info);
     }
-
-    let mut last_err: Option<anyhow::Error> = None;
-    for pw in tried {
-        let result = (|| -> Result<ArchiveInfo, unrar::error::UnrarError> {
-            let archive = match &pw {
-                Some(p) => unrar::Archive::with_password(path, p),
-                None => unrar::Archive::new(path),
-            };
-            let mut open = archive.open_for_listing()?;
-            let mut info = empty_info();
-            info.used_password = pw.clone();
-            loop {
-                let Some(cursor) = open.read_header()? else { break };
-                let h = cursor.entry();
-                info.entries.push(Entry {
-                    path: h.filename.to_string_lossy().replace('\\', "/"),
-                    size: h.unpacked_size,
-                    compressed: 0,
-                    is_dir: cursor.entry().is_directory(),
-                    mtime: dos_to_unix(h.file_time),
-                    encrypted: cursor.entry().is_encrypted(),
-                    crc: Some(h.file_crc),
-                });
-                open = cursor.skip()?;
-            }
-            Ok(info)
-        })();
-        match result {
-            Ok(info) => return Ok(info),
-            Err(e) => {
-                use unrar::error::Code;
-                if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
-                    last_err = Some(anyhow::anyhow!("PASSWORD_REQUIRED"));
-                    continue;
-                }
-                return Err(anyhow::anyhow!("打开 RAR 失败: {:?}", e.code));
-            }
+    for p in opts.fallback_passwords.get() {
+        if let Some(info) = try_list_rar(path, &Some(p.clone()))? {
+            return Ok(info);
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("打开 RAR 失败")))
+    Err(anyhow::anyhow!("PASSWORD_REQUIRED"))
 }
 
 fn dos_to_unix(dos: u32) -> Option<i64> {

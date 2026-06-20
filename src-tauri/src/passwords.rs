@@ -2,7 +2,32 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// 惰性、按需读取的已存密码集合：只有真正需要试密码（打开/解压加密归档失败回退）时
+/// 才会去读系统凭据库，且整次操作内只读一次（memoized）。避免「每次打开归档都弹钥匙串」。
+#[derive(Clone)]
+pub struct LazyPasswords(Arc<LazyInner>);
+
+struct LazyInner {
+    provider: Box<dyn Fn() -> Vec<String> + Send + Sync>,
+    cache: OnceLock<Vec<String>>,
+}
+
+impl LazyPasswords {
+    pub fn new(f: impl Fn() -> Vec<String> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(LazyInner { provider: Box::new(f), cache: OnceLock::new() }))
+    }
+    /// 空集合（无回退密码）。
+    pub fn none() -> Self {
+        Self::new(Vec::new)
+    }
+    /// 读取并缓存——首次调用才真正执行 provider（可能读凭据库）。
+    pub fn get(&self) -> &[String] {
+        self.0.cache.get_or_init(|| (self.0.provider)())
+    }
+}
 
 /// 系统凭据库里的 service 名（每条密码用唯一 id 作为 account）。
 const KR_SERVICE: &str = "dev.vela.origami.passwords";
