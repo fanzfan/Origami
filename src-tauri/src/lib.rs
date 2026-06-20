@@ -438,8 +438,21 @@ fn system_auth_available() -> bool {
 
 /// 触发系统认证（用于在展示已保存密码前校验本人）。返回是否通过。
 #[tauri::command]
-async fn system_auth(reason: String) -> CmdResult<bool> {
-    tauri::async_runtime::spawn_blocking(move || sysauth::authenticate(&reason).map_err(err_str))
+async fn system_auth(app: tauri::AppHandle, reason: String) -> CmdResult<bool> {
+    // Windows：取主窗口 HWND，把 Hello 对话框关联到主窗口以确保前置；其它平台无需。
+    #[cfg(target_os = "windows")]
+    let hwnd: Option<isize> = {
+        use tauri::Manager;
+        app.get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let hwnd: Option<isize> = {
+        let _ = &app;
+        None
+    };
+    tauri::async_runtime::spawn_blocking(move || sysauth::authenticate(&reason, hwnd).map_err(err_str))
         .await
         .map_err(|e| e.to_string())?
 }
