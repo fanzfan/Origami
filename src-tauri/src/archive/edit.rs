@@ -161,7 +161,7 @@ fn edit_rebuild(
     let eopts = ExtractOptions {
         job_id: opts.job_id.clone(),
         password: opts.password.clone(),
-        fallback_passwords: Vec::new(),
+        fallback_passwords: crate::passwords::LazyPasswords::none(),
         encoding: opts.encoding.clone(),
         entries: Vec::new(),
         smart: false,

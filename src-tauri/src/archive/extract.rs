@@ -23,7 +23,7 @@ pub struct Progress {
 pub struct ExtractOptions {
     pub job_id: String,
     pub password: Option<String>,
-    pub fallback_passwords: Vec<String>,
+    pub fallback_passwords: crate::passwords::LazyPasswords,
     pub encoding: String,
     /// Selected entry paths (decoded). Empty = all.
     pub entries: Vec<String>,
@@ -309,7 +309,7 @@ fn extract_zip(
         if opts.password.is_some() {
             candidates.push(opts.password.clone());
         }
-        for p in &opts.fallback_passwords {
+        for p in opts.fallback_passwords.get() {
             candidates.push(Some(p.clone()));
         }
         let test_idx = names.iter().position(|(_, enc, _)| *enc).unwrap_or(0);
@@ -406,29 +406,22 @@ fn extract_7z(
 ) -> anyhow::Result<PathBuf> {
     use sevenz_rust2::{ArchiveReader, Password};
 
-    let mut candidates: Vec<Option<String>> = vec![opts.password.clone()];
-    for p in &opts.fallback_passwords {
-        candidates.push(Some(p.clone()));
-    }
-
-    let mut reader = None;
-    let mut last_err = anyhow::anyhow!("打开 7z 失败");
-    for cand in candidates {
-        let password = cand
-            .as_deref()
-            .map(Password::from)
-            .unwrap_or_else(Password::empty);
-        match ArchiveReader::open(archive_path, password) {
-            Ok(r) => {
+    // 主密码优先；只有它失败才惰性读取已存密码（避免无谓地读凭据库）。
+    let open_with = |cand: &Option<String>| {
+        let password = cand.as_deref().map(Password::from).unwrap_or_else(Password::empty);
+        ArchiveReader::open(archive_path, password).ok()
+    };
+    let mut reader = open_with(&opts.password).map(|r| (r, opts.password.clone()));
+    if reader.is_none() {
+        for p in opts.fallback_passwords.get() {
+            let cand = Some(p.clone());
+            if let Some(r) = open_with(&cand) {
                 reader = Some((r, cand));
                 break;
             }
-            Err(e) => {
-                last_err = anyhow::anyhow!("PASSWORD_REQUIRED: {e}");
-            }
         }
     }
-    let (mut reader, _used) = reader.ok_or(last_err)?;
+    let (mut reader, _used) = reader.ok_or_else(|| anyhow::anyhow!("PASSWORD_REQUIRED"))?;
 
     let roots: Vec<String> = reader
         .archive()
@@ -489,12 +482,7 @@ fn extract_rar(
     dest: &Path,
     opts: &ExtractOptions,
 ) -> anyhow::Result<PathBuf> {
-    let mut candidates: Vec<Option<String>> = vec![opts.password.clone()];
-    for p in &opts.fallback_passwords {
-        candidates.push(Some(p.clone()));
-    }
-
-    // Pre-list to compute roots for smart mode.
+    // Pre-list to compute roots for smart mode.（list 内部同样惰性读取已存密码）
     let list_opts = super::list::ListOptions {
         password: opts.password.clone(),
         encoding: opts.encoding.clone(),
@@ -516,10 +504,10 @@ fn extract_rar(
         .sum();
     let t = Tracker::new(ctx, &opts.job_id, total_bytes);
 
-    let mut last_err: Option<anyhow::Error> = None;
-    for cand in candidates {
+    // 用单个密码尝试解压：Ok(true)=成功，Ok(false)=密码错误，Err=致命错误。
+    let attempt = |cand: &Option<String>| -> anyhow::Result<bool> {
         let result = (|| -> Result<(), unrar::error::UnrarError> {
-            let archive = match &cand {
+            let archive = match cand {
                 Some(p) => unrar::Archive::with_password(archive_path, p),
                 None => unrar::Archive::new(archive_path),
             };
@@ -542,23 +530,35 @@ fn extract_rar(
             Ok(())
         })();
         match result {
-            Ok(()) => {
-                if ctx.cancel.load(Ordering::Relaxed) {
-                    anyhow::bail!("CANCELLED");
-                }
-                return Ok(out_base);
-            }
+            Ok(()) => Ok(true),
             Err(e) => {
                 use unrar::error::Code;
                 if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
-                    last_err = Some(anyhow::anyhow!("PASSWORD_REQUIRED"));
-                    continue;
+                    Ok(false)
+                } else {
+                    Err(anyhow::anyhow!("RAR 解压失败: {:?}", e.code))
                 }
-                return Err(anyhow::anyhow!("RAR 解压失败: {:?}", e.code));
+            }
+        }
+    };
+
+    // 主密码优先；失败才惰性读取已存密码。
+    let mut ok = attempt(&opts.password)?;
+    if !ok {
+        for p in opts.fallback_passwords.get() {
+            if attempt(&Some(p.clone()))? {
+                ok = true;
+                break;
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("RAR 解压失败")))
+    if !ok {
+        return Err(anyhow::anyhow!("PASSWORD_REQUIRED"));
+    }
+    if ctx.cancel.load(Ordering::Relaxed) {
+        anyhow::bail!("CANCELLED");
+    }
+    Ok(out_base)
 }
 
 // ---------------- TAR ----------------
@@ -581,7 +581,7 @@ fn extract_tar(
         let list_opts = super::list::ListOptions {
             password: None,
             encoding: opts.encoding.clone(),
-            fallback_passwords: Vec::new(),
+            fallback_passwords: crate::passwords::LazyPasswords::none(),
         };
         let info = super::list::list(archive_path, &list_opts)?;
         let roots: Vec<String> = info
@@ -617,7 +617,7 @@ pub fn test_archive(
     archive_path: &Path,
     job_id: &str,
     password: Option<String>,
-    fallbacks: Vec<String>,
+    fallbacks: crate::passwords::LazyPasswords,
 ) -> anyhow::Result<()> {
     let format = detect_format(archive_path)?;
     let result = match format {
@@ -642,7 +642,7 @@ pub fn test_archive(
                     if let Some(p) = &password {
                         cands.push(p.clone());
                     }
-                    cands.extend(fallbacks.iter().cloned());
+                    cands.extend(fallbacks.get().iter().cloned());
                     for pw in cands {
                         if zip.by_index_decrypt(i, pw.as_bytes()).is_ok() {
                             ok = Some(pw);
@@ -668,7 +668,7 @@ pub fn test_archive(
         Format::SevenZ => {
             use sevenz_rust2::{ArchiveReader, Password};
             let mut cands: Vec<Option<String>> = vec![password.clone()];
-            cands.extend(fallbacks.iter().cloned().map(Some));
+            cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("测试失败");
             let mut ok = false;
             for cand in cands {
@@ -714,7 +714,7 @@ pub fn test_archive(
         }
         Format::Rar => {
             let mut cands: Vec<Option<String>> = vec![password.clone()];
-            cands.extend(fallbacks.iter().cloned().map(Some));
+            cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("测试失败");
             let mut ok = false;
             let list_opts = super::list::ListOptions {

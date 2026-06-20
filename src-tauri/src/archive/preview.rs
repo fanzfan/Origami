@@ -98,7 +98,7 @@ pub fn preview_entry(
     archive_path: &Path,
     entry_path: &str,
     password: Option<String>,
-    fallbacks: Vec<String>,
+    fallbacks: crate::passwords::LazyPasswords,
     encoding: &str,
 ) -> anyhow::Result<Preview> {
     let format = detect_format(archive_path)?;
@@ -119,7 +119,7 @@ pub fn preview_entry(
                     if let Some(p) = &password {
                         cands.push(p.clone());
                     }
-                    cands.extend(fallbacks.iter().cloned());
+                    cands.extend(fallbacks.get().iter().cloned());
                     let mut found = None;
                     for pw in cands {
                         if zip.by_index_decrypt(i, pw.as_bytes()).is_ok() {
@@ -140,7 +140,7 @@ pub fn preview_entry(
         Format::SevenZ => {
             use sevenz_rust2::{ArchiveReader, Password};
             let mut cands: Vec<Option<String>> = vec![password.clone()];
-            cands.extend(fallbacks.iter().cloned().map(Some));
+            cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("条目不存在: {entry_path}");
             for cand in cands {
                 let pw = cand
@@ -188,7 +188,7 @@ pub fn preview_entry(
         }
         Format::Rar => {
             let mut cands: Vec<Option<String>> = vec![password.clone()];
-            cands.extend(fallbacks.iter().cloned().map(Some));
+            cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("条目不存在: {entry_path}");
             for cand in cands {
                 let result = (|| -> Result<Option<(String, Vec<u8>, u64)>, unrar::error::UnrarError> {
