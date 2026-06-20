@@ -8,6 +8,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-close",
     "core:window:allow-set-effects",
+    "core:window:allow-set-effects",
     "core:event:default",
     "dialog:default",
     "opener:default",
