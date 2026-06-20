@@ -109,6 +109,7 @@ export const api = {
     invoke<string>("extract_entry_to_temp", { ...p }),
 
   defaultExtractDir: (path: string) => invoke<string>("default_extract_dir", { path }),
+  listDir: (path?: string) => invoke<DirListing>("list_dir", { path }),
   defaultCreateDest: (sources: string[], ext: string) =>
     invoke<string>("default_create_dest", { sources, ext }),
 
@@ -139,6 +140,20 @@ export interface AssocEntry {
   currentApp: string | null;
 }
 
+export interface FsEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  mtime: number | null;
+}
+
+export interface DirListing {
+  path: string; // 当前目录；"" = 此电脑（驱动器列表）
+  parent: string | null; // 上级；null = 已在最顶层；"" = 此电脑
+  entries: FsEntry[];
+}
+
 export type PendingAction =
   | { kind: "open"; paths: string[] }
   | { kind: "create"; format: string; paths: string[] };
@@ -160,4 +175,42 @@ export function fmtDate(ts: number | null): string {
 
 export function newJobId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+export const ARCHIVE_EXTS = [
+  "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst", "jar", "apk",
+];
+
+export function isArchive(path: string): boolean {
+  const lower = path.toLowerCase();
+  return ARCHIVE_EXTS.some((e) => lower.endsWith("." + e));
+}
+
+// 把一个文件系统绝对路径拆成可点击的面包屑：[此电脑, C:, Users, fan, …]。
+// 每段的 path 是导航到该层所需的真实路径（"" = 此电脑 / 驱动器列表）。
+export function fsBreadcrumbs(path: string): { label: string; path: string }[] {
+  const crumbs = [{ label: "💻 此电脑", path: "" }];
+  if (!path) return crumbs;
+  const win = /^[A-Za-z]:/.test(path) || path.includes("\\");
+  if (win) {
+    const parts = path.split(/[\\/]/).filter(Boolean); // ["C:","Users","fan"]
+    let acc = "";
+    parts.forEach((part, i) => {
+      acc = i === 0 ? part + "\\" : acc.replace(/\\?$/, "\\") + part;
+      crumbs.push({ label: part, path: acc });
+    });
+  } else {
+    let acc = "";
+    for (const part of path.split("/").filter(Boolean)) {
+      acc = acc + "/" + part;
+      crumbs.push({ label: part, path: acc });
+    }
+  }
+  return crumbs;
+}
+
+// 取路径的父目录与末段名（跨平台分隔符）。
+export function splitParent(path: string): { parent: string; name: string } {
+  const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return i >= 0 ? { parent: path.slice(0, i), name: path.slice(i + 1) } : { parent: "", name: path };
 }

@@ -10,6 +10,7 @@ export interface Settings {
   font: string; // 字体族 key，见 FONTS
   theme: string; // 主题 key，见 THEMES
   mode: AppearanceMode; // 外观模式（亮/暗/跟随系统）
+  effects: boolean; // 窗口材质（Win11 Mica / macOS 毛玻璃）
   level: number; // 默认压缩等级 0(仅存储)..9(最高)
   excludeJunk: boolean; // 压缩时剔除 .DS_Store / __MACOSX / Thumbs.db 等
 }
@@ -44,7 +45,7 @@ export const SCALE_MIN = 0.7;
 export const SCALE_MAX = 1.8;
 export const SCALE_STEP = 0.1;
 
-const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", level: 6, excludeJunk: true };
+const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", effects: true, level: 6, excludeJunk: true };
 
 export function clampScale(s: number): number {
   return Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(s * 10) / 10));
@@ -62,6 +63,7 @@ export function loadSettings(): Settings {
       font: FONTS.some((f) => f[0] === raw.font) ? raw.font : DEFAULTS.font,
       theme: THEMES.some((t) => t[0] === raw.theme) ? raw.theme : DEFAULTS.theme,
       mode: MODES.some((m) => m[0] === raw.mode) ? raw.mode : DEFAULTS.mode,
+      effects: typeof raw.effects === "boolean" ? raw.effects : DEFAULTS.effects,
       level: typeof raw.level === "number" ? clampLevel(raw.level) : DEFAULTS.level,
       excludeJunk: typeof raw.excludeJunk === "boolean" ? raw.excludeJunk : DEFAULTS.excludeJunk,
     };
@@ -90,4 +92,30 @@ export function applySettings(s: Settings) {
   // 复选框)随之变色。system 时交给 prefers-color-scheme 与 UA 自行决定。
   root.setAttribute("data-mode", s.mode);
   root.style.colorScheme = s.mode === "system" ? "light dark" : s.mode;
+}
+
+// 窗口材质（Win11 Mica / macOS 毛玻璃）。仅作用于当前（主）窗口。
+//
+// 默认材质由 tauri.conf.json 的 windowEffects 在建窗时施加（最可靠）。这里负责：
+//   1) data-effects 属性驱动 CSS（"on" 让 body 透明、材质透出；"off" 保持不透明）；
+//   2) 运行时开关：关→清除材质，开→重新施加。
+// 注意：Mica 还需系统「透明效果」开启，且材质感来自桌面壁纸（纯色桌面看不出）。
+export async function applyWindowEffects(s: Settings) {
+  document.documentElement.setAttribute("data-effects", s.effects ? "on" : "off");
+  try {
+    const { getCurrentWindow, Effect, EffectState } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    if (!s.effects) {
+      await win.setEffects({ effects: [] }); // 清除材质
+      return;
+    }
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
+    await win.setEffects(
+      isMac
+        ? { effects: [Effect.UnderWindowBackground], state: EffectState.FollowsWindowActiveState }
+        : { effects: [Effect.Mica] },
+    );
+  } catch {
+    // 运行时施加失败不影响默认观感：材质已由配置在建窗时施加。
+  }
 }

@@ -326,6 +326,18 @@ export function SettingsDialog(p: {
         </select>
       </div>
 
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={s.effects}
+          onChange={(e) => p.onChange({ effects: e.target.checked })}
+        />
+        <span className="grow">
+          窗口材质效果
+          <div className="hint">Windows 11 显示 Mica 云母材质，macOS 显示毛玻璃；旧系统不支持时自动保持不透明。</div>
+        </span>
+      </label>
+
       <div className="settings-section">压缩与解压</div>
 
       <div className="field">

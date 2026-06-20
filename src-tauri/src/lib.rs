@@ -722,6 +722,97 @@ fn default_extract_dir(path: String) -> String {
         .unwrap_or(path)
 }
 
+// ---------------- 文件系统浏览（应用内文件管理器） ----------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FsEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+    mtime: Option<i64>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirListing {
+    /// 当前目录绝对路径；"" 表示「此电脑」（驱动器列表 / 根）。
+    path: String,
+    /// 上级目录路径；None 表示已在最顶层；"" 表示上级是「此电脑」。
+    parent: Option<String>,
+    entries: Vec<FsEntry>,
+}
+
+fn home_path() -> String {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default()
+}
+
+fn mtime_secs(meta: &std::fs::Metadata) -> Option<i64> {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+}
+
+/// 列出文件系统目录，供应用内文件浏览器使用。
+/// - `path` 为 None：列出用户主目录。
+/// - `path` 为 ""：列出「此电脑」（Windows 各驱动器；其它平台为根 `/`）。
+/// - 其它：列出该目录。无权限等无法读取的条目跳过。
+#[tauri::command]
+fn list_dir(path: Option<String>) -> CmdResult<DirListing> {
+    let p = path.unwrap_or_else(home_path);
+
+    if p.is_empty() {
+        #[cfg(target_os = "windows")]
+        {
+            let mut entries = Vec::new();
+            for c in b'A'..=b'Z' {
+                let root = format!("{}:\\", c as char);
+                if std::fs::metadata(&root).is_ok() {
+                    entries.push(FsEntry {
+                        name: format!("{}:", c as char),
+                        path: root,
+                        is_dir: true,
+                        size: 0,
+                        mtime: None,
+                    });
+                }
+            }
+            return Ok(DirListing { path: String::new(), parent: None, entries });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            return list_dir(Some("/".to_string()));
+        }
+    }
+
+    let dir = PathBuf::from(&p);
+    let rd = std::fs::read_dir(&dir).map_err(|e| format!("无法打开目录：{e}"))?;
+    let mut entries = Vec::new();
+    for ent in rd.flatten() {
+        let Ok(meta) = ent.metadata() else { continue };
+        let is_dir = meta.is_dir();
+        entries.push(FsEntry {
+            name: ent.file_name().to_string_lossy().into_owned(),
+            path: ent.path().to_string_lossy().into_owned(),
+            is_dir,
+            size: if is_dir { 0 } else { meta.len() },
+            mtime: mtime_secs(&meta),
+        });
+    }
+
+    // 驱动器根（如 C:\）的上级是「此电脑」("")；其它取 parent。
+    let parent = match dir.parent() {
+        Some(par) if !par.as_os_str().is_empty() => Some(par.to_string_lossy().into_owned()),
+        _ => Some(String::new()),
+    };
+
+    Ok(DirListing { path: p, parent, entries })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -780,6 +871,7 @@ pub fn run() {
             extract_entry_to_temp,
             default_extract_dir,
             default_create_dest,
+            list_dir,
             take_pending_actions,
             frontend_ready,
             begin_quick_job,

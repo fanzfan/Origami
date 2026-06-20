@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArchiveInfo, Entry, fmtDate, fmtSize } from "../api";
+import { ArchiveInfo, Entry, fmtDate, fmtSize, fsBreadcrumbs, splitParent } from "../api";
 import { FileIcon } from "../icons";
 import { EntryProperties } from "./dialogs";
+import { PathBar } from "./PathBar";
 
 interface Props {
   info: ArchiveInfo;
@@ -15,6 +16,9 @@ interface Props {
   onOpenExternal: (entryPath: string) => void;
   onAdd: (dir: string) => void;
   onRemove: (entries: string[]) => void;
+  // 导航到某个真实文件系统目录（离开压缩包）。"" = 此电脑。由路径栏的文件系统段
+  // 与压缩包根的 .. 触发。
+  onNavigateFs?: (path: string) => void;
 }
 
 const EDITABLE = new Set(["ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST"]);
@@ -130,16 +134,41 @@ export function Browser(p: Props) {
     return all;
   }, [p.info, cwd, search, sortKey, sortAsc]);
 
+  // 压缩包所在真实文件夹（用于把路径栏拼成「真实路径 › 压缩包 › 内部目录」）。
+  const archiveParent = useMemo(() => splitParent(p.archivePath), [p.archivePath]);
+
+  // 统一路径栏：文件系统段（此电脑…文件夹）+ 压缩包本身（当作一个文件夹）+ 包内子目录。
+  type Crumb = { label: string; kind: "fs" | "arc" | "int"; target: string };
   const crumbs = useMemo(() => {
-    const parts = cwd ? cwd.split("/") : [];
-    const list: { label: string; path: string }[] = [{ label: "📦", path: "" }];
+    const list: Crumb[] = [];
+    if (p.onNavigateFs) {
+      for (const c of fsBreadcrumbs(archiveParent.parent)) {
+        list.push({ label: c.label, kind: "fs", target: c.path });
+      }
+    }
+    list.push({ label: `🗜 ${archiveParent.name}`, kind: "arc", target: "" });
     let acc = "";
-    for (const part of parts) {
+    for (const part of cwd ? cwd.split("/") : []) {
       acc = acc ? `${acc}/${part}` : part;
-      list.push({ label: part, path: acc });
+      list.push({ label: part, kind: "int", target: acc });
     }
     return list;
-  }, [cwd]);
+  }, [cwd, archiveParent, p.onNavigateFs]);
+
+  const onCrumb = useCallback(
+    (c: Crumb) => {
+      if (c.kind === "fs") p.onNavigateFs?.(c.target);
+      else enterDir(c.target); // arc 根("") 或包内子目录
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [p.onNavigateFs],
+  );
+
+  // 编辑态预填的完整路径：真实路径 + 包名 + 包内子目录。
+  const fullPath = useMemo(() => {
+    const sep = p.archivePath.includes("\\") ? "\\" : "/";
+    return p.archivePath + (cwd ? sep + cwd.split("/").join(sep) : "");
+  }, [p.archivePath, cwd]);
 
   const clickSort = (k: SortKey) => {
     if (sortKey === k) setSortAsc(!sortAsc);
@@ -177,9 +206,13 @@ export function Browser(p: Props) {
   }, []);
 
   const goUp = useCallback(() => {
-    if (!cwd) return;
+    if (!cwd) {
+      // 已在压缩包根：退回到压缩包所在的真实文件夹。
+      p.onNavigateFs?.(archiveParent.parent);
+      return;
+    }
     enterDir(cwd.includes("/") ? cwd.slice(0, cwd.lastIndexOf("/")) : "");
-  }, [cwd, enterDir]);
+  }, [cwd, enterDir, p, archiveParent]);
 
   const onDouble = (row: Row) => {
     if (row.isDir) enterDir(row.path);
@@ -339,22 +372,17 @@ export function Browser(p: Props) {
         />
       </div>
 
-      <div className="breadcrumb">
-        {crumbs.map((c, i) => (
-          <span key={c.path} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-            {i > 0 && <span className="sep">›</span>}
-            <span
-              className={`crumb ${i === crumbs.length - 1 ? "current" : ""}`}
-              onClick={() => enterDir(c.path)}
-            >
-              {c.label}
-            </span>
-          </span>
-        ))}
-        <span className="spacer" />
-        <button className="linkbtn" onClick={selectAll} title="全选（⌘/Ctrl+A）">全选</button>
-        <button className="linkbtn" onClick={invert} title="反选">反选</button>
-      </div>
+      <PathBar
+        crumbs={crumbs.map((c) => ({ label: c.label, onClick: () => onCrumb(c) }))}
+        fullPath={fullPath}
+        onSubmit={(v) => p.onNavigateFs?.(v)}
+        trailing={
+          <>
+            <button className="linkbtn" onClick={selectAll} title="全选（⌘/Ctrl+A）">全选</button>
+            <button className="linkbtn" onClick={invert} title="反选">反选</button>
+          </>
+        }
+      />
 
       <div className="filelist">
         <table className="files">
@@ -374,11 +402,11 @@ export function Browser(p: Props) {
             </tr>
           </thead>
           <tbody>
-            {cwd && !search && (
+            {(cwd || p.onNavigateFs) && !search && (
               <tr onDoubleClick={goUp}>
                 <td className="name">
                   <span className="icon">↩️</span>
-                  <span>..</span>
+                  <span>{cwd ? ".." : ".. (返回上级文件夹)"}</span>
                 </td>
                 <td className="num" />
                 <td className="num" />

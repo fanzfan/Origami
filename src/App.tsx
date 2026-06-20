@@ -3,9 +3,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { api, ArchiveInfo, newJobId, Progress } from "./api";
+import { api, ARCHIVE_EXTS, ArchiveInfo, DirListing, isArchive, newJobId, Progress } from "./api";
 import { Welcome } from "./components/Welcome";
 import { Browser } from "./components/Browser";
+import { FileExplorer } from "./components/FileExplorer";
 import {
   CreateDialog,
   ExtractDialog,
@@ -17,7 +18,7 @@ import {
   ProgressModal,
   SettingsDialog,
 } from "./components/dialogs";
-import { applySettings, clampScale, loadSettings, saveSettings, SCALE_STEP } from "./settings";
+import { applySettings, applyWindowEffects, clampScale, loadSettings, saveSettings, SCALE_STEP } from "./settings";
 
 export interface Toast {
   id: number;
@@ -31,15 +32,6 @@ export interface JobState {
   progress: Progress | null;
 }
 
-const ARCHIVE_EXTS = [
-  "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst", "jar", "apk",
-];
-
-function isArchive(path: string): boolean {
-  const lower = path.toLowerCase();
-  return ARCHIVE_EXTS.some((e) => lower.endsWith("." + e));
-}
-
 function loadRecent(): string[] {
   try {
     return JSON.parse(localStorage.getItem("recent") ?? "[]");
@@ -51,6 +43,8 @@ function loadRecent(): string[] {
 export default function App() {
   const [archivePath, setArchivePath] = useState<string | null>(null);
   const [info, setInfo] = useState<ArchiveInfo | null>(null);
+  const [fsListing, setFsListing] = useState<DirListing | null>(null);
+  const [fsLoading, setFsLoading] = useState(false);
   const [password, setPassword] = useState<string | undefined>();
   const [encoding, setEncoding] = useState("auto");
   const [loading, setLoading] = useState(false);
@@ -79,6 +73,12 @@ export default function App() {
     applySettings(settings);
     saveSettings(settings);
   }, [settings]);
+
+  // 窗口材质（Mica / 毛玻璃）：仅主窗，开关变化时重新施加。
+  useEffect(() => {
+    applyWindowEffects(settings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.effects]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -164,6 +164,31 @@ export default function App() {
     setInfo(null);
     setPassword(undefined);
   }, []);
+
+  // 进入/切换文件系统视图。path 省略 = 主目录；"" = 此电脑（驱动器列表）。
+  const browseDir = useCallback(
+    async (path?: string) => {
+      setFsLoading(true);
+      try {
+        const listing = await api.listDir(path);
+        setFsListing(listing);
+      } catch (e) {
+        toast("error", `无法打开目录：${e}`);
+      } finally {
+        setFsLoading(false);
+      }
+    },
+    [toast],
+  );
+
+  // 从压缩包路径栏跳到某个真实目录（离开压缩包，进入文件系统视图）。"" = 此电脑。
+  const navigateFs = useCallback(
+    (path: string) => {
+      closeArchive();
+      browseDir(path);
+    },
+    [closeArchive, browseDir],
+  );
 
   // ----- progress events -----
   const jobRef = useRef<JobState | null>(null);
@@ -367,6 +392,8 @@ export default function App() {
       try {
         await api.createArchive({ jobId, sources, excludeJunk: settings.excludeJunk, ...p });
         toast("ok", "压缩完成");
+        // 文件系统视图下刷新当前目录，让新建的压缩包立即出现。
+        if (fsListing) browseDir(fsListing.path);
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", "已取消");
@@ -375,7 +402,7 @@ export default function App() {
         setJob(null);
       }
     },
-    [createFor, toast, settings.excludeJunk],
+    [createFor, toast, settings.excludeJunk, fsListing, browseDir],
   );
 
   const runAdd = useCallback(
@@ -472,10 +499,13 @@ export default function App() {
   }, [job]);
 
   const title = useMemo(() => {
-    if (!archivePath) return "Origami";
-    const name = archivePath.split("/").pop();
-    return info ? `${name} — ${info.format}` : name ?? "";
-  }, [archivePath, info]);
+    if (archivePath) {
+      const name = archivePath.split(/[\\/]/).pop();
+      return info ? `${name} — ${info.format}` : name ?? "";
+    }
+    if (fsListing) return fsListing.path || "此电脑";
+    return "Origami";
+  }, [archivePath, info, fsListing]);
 
   return (
     <div className="app">
@@ -485,6 +515,11 @@ export default function App() {
         {archivePath && (
           <button className="btn ghost sm" onClick={closeArchive}>
             ✕ 关闭归档
+          </button>
+        )}
+        {!archivePath && fsListing && (
+          <button className="btn ghost sm" onClick={() => setFsListing(null)} title="返回主页">
+            🏠 主页
           </button>
         )}
         {!isWin && (
@@ -521,6 +556,16 @@ export default function App() {
           onOpenExternal={openExternal}
           onAdd={runAdd}
           onRemove={runRemove}
+          onNavigateFs={navigateFs}
+        />
+      ) : fsListing ? (
+        <FileExplorer
+          listing={fsListing}
+          loading={fsLoading}
+          onNavigate={(path) => browseDir(path)}
+          onOpenArchive={openArchive}
+          onOpenFile={(path) => openPath(path).catch((e) => toast("error", `打开失败：${e}`))}
+          onCompress={(paths) => setCreateFor(paths)}
         />
       ) : (
         <Welcome
@@ -531,6 +576,7 @@ export default function App() {
           onOpenRecent={openArchive}
           onCompressFiles={pickFilesToCompress}
           onCompressFolder={pickFolderToCompress}
+          onBrowse={() => browseDir()}
         />
       )}
 

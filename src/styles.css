@@ -72,6 +72,15 @@
 :root[data-mode="dark"][data-theme="rose"] { --accent: #f472b6; --accent-soft: #3a1426; --accent-text: #f9a8d4; }
 :root[data-mode="dark"][data-theme="slate"] { --accent: #94a3b8; --accent-soft: #1f2530; --accent-text: #cbd5e1; }
 
+/* ---------- 窗口材质（Win11 Mica / macOS 毛玻璃） ----------
+   data-effects="on" 时让窗口底层材质透出：本应用绝大多数面板本就无背景填充，
+   只需把 body 透明、再把会遮挡内容的 sticky 表头改为半透明即可。对话框/浮层保持
+   不透明以保证可读性。 */
+:root[data-effects="on"] body { background: transparent; }
+:root[data-effects="on"] table.files th {
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+}
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {
@@ -217,6 +226,22 @@ input[type="checkbox"] { accent-color: var(--accent); }
 }
 .breadcrumb .crumb {
   padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+/* 地址栏：空白填充块占满剩余宽度，点击进入编辑态。 */
+.breadcrumb .pathspace { flex: 1; align-self: stretch; min-width: 24px; cursor: text; }
+.breadcrumb.editing { padding-top: 4px; padding-bottom: 4px; }
+.pathedit {
+  width: 100%;
+  background: var(--bg-elev);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  cursor: text;
+  user-select: text;
 }
 .breadcrumb .crumb:hover { background: var(--bg-hover); color: var(--text); }
 .breadcrumb .crumb.current { color: var(--text); font-weight: 600; }
