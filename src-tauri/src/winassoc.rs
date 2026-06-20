@@ -25,7 +25,10 @@ fn progid(ext: &str) -> String {
 }
 
 /// 注册 ProgID 并把 `.ext` 默认打开程序设为它。
-pub fn associate(ext: &str) -> Result<()> {
+///
+/// `icon_path`：该格式专属图标（.ico）的绝对路径；为 None 时退回应用主图标
+/// （`"{exe}",0`）。专属图标随安装包作为资源落在 resource 目录，由调用方解析后传入。
+pub fn associate(ext: &str, icon_path: Option<&str>) -> Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let exe = exe()?;
     let pid = progid(ext);
@@ -36,7 +39,12 @@ pub fn associate(ext: &str) -> Result<()> {
         .context("创建 ProgID 失败")?;
     prog.set_value("", &format!("Origami {} 压缩文件", ext.to_uppercase()))?;
     let (icon, _) = hkcu.create_subkey(format!("{ROOT}\\{pid}\\DefaultIcon"))?;
-    icon.set_value("", &format!("\"{exe}\",0"))?;
+    // 专属图标用整图（索引 0 之外无其它资源），退回主图标时取 exe 的图标 0。
+    let icon_val = match icon_path {
+        Some(p) if std::path::Path::new(p).exists() => format!("\"{p}\",0"),
+        _ => format!("\"{exe}\",0"),
+    };
+    icon.set_value("", &icon_val)?;
     let (cmd, _) = hkcu.create_subkey(format!("{ROOT}\\{pid}\\shell\\open\\command"))?;
     cmd.set_value("", &format!("\"{exe}\" \"%1\""))?;
 

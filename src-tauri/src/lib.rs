@@ -585,7 +585,11 @@ fn file_assoc_list() -> Vec<AssocEntry> {
 }
 
 #[tauri::command]
-fn file_assoc_set(exts: Vec<String>, associate: bool) -> CmdResult<()> {
+fn file_assoc_set(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    exts: Vec<String>,
+    associate: bool,
+) -> CmdResult<()> {
     for ext in &exts {
         let ext = ext.trim_start_matches('.');
         #[cfg(target_os = "macos")]
@@ -598,8 +602,18 @@ fn file_assoc_set(exts: Vec<String>, associate: bool) -> CmdResult<()> {
         }
         #[cfg(target_os = "windows")]
         {
+            use tauri::Manager;
             if associate {
-                winassoc::associate(ext).map_err(err_str)?;
+                // 解析随包分发的该格式专属 .ico（resource 目录），传给注册逻辑。
+                let icon = app
+                    .path()
+                    .resolve(
+                        format!("icons/filetypes/{ext}.ico"),
+                        tauri::path::BaseDirectory::Resource,
+                    )
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned());
+                winassoc::associate(ext, icon.as_deref()).map_err(err_str)?;
             } else {
                 winassoc::remove(ext).map_err(err_str)?;
             }
