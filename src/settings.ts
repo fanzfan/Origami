@@ -2,13 +2,24 @@
 // - 外观：界面缩放（document zoom）、字体族、主题（CSS 变量 / data-theme）。
 // - 压缩：默认压缩等级、是否剔除系统垃圾文件。
 
+// 外观模式：跟随系统 / 强制浅色 / 强制深色。
+export type AppearanceMode = "system" | "light" | "dark";
+
 export interface Settings {
   scale: number; // 界面整体缩放（字体大小），1 = 100%
   font: string; // 字体族 key，见 FONTS
   theme: string; // 主题 key，见 THEMES
+  mode: AppearanceMode; // 外观模式（亮/暗/跟随系统）
   level: number; // 默认压缩等级 0(仅存储)..9(最高)
   excludeJunk: boolean; // 压缩时剔除 .DS_Store / __MACOSX / Thumbs.db 等
 }
+
+// [key, 显示名]。深浅配色在 styles.css 里按 data-mode 与 prefers-color-scheme 切换。
+export const MODES: [AppearanceMode, string][] = [
+  ["system", "跟随系统"],
+  ["light", "浅色"],
+  ["dark", "深色"],
+];
 
 export const FONTS: [string, string, string][] = [
   // [key, 显示名, CSS font-family]
@@ -33,7 +44,7 @@ export const SCALE_MIN = 0.7;
 export const SCALE_MAX = 1.8;
 export const SCALE_STEP = 0.1;
 
-const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", level: 6, excludeJunk: true };
+const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", level: 6, excludeJunk: true };
 
 export function clampScale(s: number): number {
   return Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(s * 10) / 10));
@@ -50,6 +61,7 @@ export function loadSettings(): Settings {
       scale: typeof raw.scale === "number" ? clampScale(raw.scale) : DEFAULTS.scale,
       font: FONTS.some((f) => f[0] === raw.font) ? raw.font : DEFAULTS.font,
       theme: THEMES.some((t) => t[0] === raw.theme) ? raw.theme : DEFAULTS.theme,
+      mode: MODES.some((m) => m[0] === raw.mode) ? raw.mode : DEFAULTS.mode,
       level: typeof raw.level === "number" ? clampLevel(raw.level) : DEFAULTS.level,
       excludeJunk: typeof raw.excludeJunk === "boolean" ? raw.excludeJunk : DEFAULTS.excludeJunk,
     };
@@ -74,4 +86,8 @@ export function applySettings(s: Settings) {
   } else {
     root.removeAttribute("data-theme");
   }
+  // 外观模式：data-mode 驱动 CSS 的深浅切换；color-scheme 让原生控件(滚动条/下拉/
+  // 复选框)随之变色。system 时交给 prefers-color-scheme 与 UA 自行决定。
+  root.setAttribute("data-mode", s.mode);
+  root.style.colorScheme = s.mode === "system" ? "light dark" : s.mode;
 }

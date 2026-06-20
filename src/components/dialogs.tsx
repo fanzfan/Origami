@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, SavedPassword } from "../api";
 import type { JobState } from "../App";
-import { FONTS, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
+import { FONTS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
 function Modal(p: { title: string; wide?: boolean; children: React.ReactNode; footer?: React.ReactNode; onClose?: () => void }) {
   return (
@@ -264,6 +264,21 @@ export function SettingsDialog(p: {
       footer={<button className="btn primary" onClick={p.onClose}>完成</button>}
     >
       <div className="settings-section">外观</div>
+
+      <div className="field">
+        <label>外观模式</label>
+        <div className="seg">
+          {MODES.map(([key, name]) => (
+            <button
+              key={key}
+              className={`seg-btn ${s.mode === key ? "on" : ""}`}
+              onClick={() => p.onChange({ mode: key })}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="field">
         <label>主题</label>

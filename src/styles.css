@@ -17,8 +17,13 @@
   font-size: 14px;
 }
 
+/* 深色调色板。两种触发：
+ *   1) 显式深色：:root[data-mode="dark"]
+ *   2) 跟随系统：未显式选「浅色」时，由 prefers-color-scheme: dark 决定
+ * 为兼顾「强制浅色」，跟随系统的块用 :not([data-mode="light"]):not([data-mode="dark"])
+ * 排除掉两种显式选择，避免覆盖用户的手动选项。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-mode="light"]):not([data-mode="dark"]) {
     --bg: #16181d;
     --bg-elev: #1e2128;
     --bg-hover: #262a33;
@@ -32,6 +37,19 @@
     --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
   }
 }
+:root[data-mode="dark"] {
+  --bg: #16181d;
+  --bg-elev: #1e2128;
+  --bg-hover: #262a33;
+  --bg-active: #2e333e;
+  --border: #2c303a;
+  --text: #e8eaf0;
+  --text-dim: #8b91a3;
+  --accent: #fb923c;
+  --accent-soft: #3a2718;
+  --accent-text: #fdba74;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
 
 /* ---------- 主题（仅覆盖强调色族，浅/深色各一套，不破坏暗色模式） ---------- */
 :root[data-theme="ocean"] { --accent: #0ea5e9; --accent-soft: #e0f2fe; --accent-text: #0369a1; }
@@ -40,13 +58,19 @@
 :root[data-theme="rose"] { --accent: #ec4899; --accent-soft: #fce7f3; --accent-text: #be185d; }
 :root[data-theme="slate"] { --accent: #475569; --accent-soft: #e8edf3; --accent-text: #334155; }
 
+/* 主题在深色下的强调色（同样两种触发，与上面的深色调色板对应）。 */
 @media (prefers-color-scheme: dark) {
-  :root[data-theme="ocean"] { --accent: #38bdf8; --accent-soft: #0c2a3a; --accent-text: #7dd3fc; }
-  :root[data-theme="forest"] { --accent: #4ade80; --accent-soft: #0f2a1a; --accent-text: #86efac; }
-  :root[data-theme="grape"] { --accent: #a78bfa; --accent-soft: #241a3a; --accent-text: #c4b5fd; }
-  :root[data-theme="rose"] { --accent: #f472b6; --accent-soft: #3a1426; --accent-text: #f9a8d4; }
-  :root[data-theme="slate"] { --accent: #94a3b8; --accent-soft: #1f2530; --accent-text: #cbd5e1; }
+  :root:not([data-mode="light"]):not([data-mode="dark"])[data-theme="ocean"] { --accent: #38bdf8; --accent-soft: #0c2a3a; --accent-text: #7dd3fc; }
+  :root:not([data-mode="light"]):not([data-mode="dark"])[data-theme="forest"] { --accent: #4ade80; --accent-soft: #0f2a1a; --accent-text: #86efac; }
+  :root:not([data-mode="light"]):not([data-mode="dark"])[data-theme="grape"] { --accent: #a78bfa; --accent-soft: #241a3a; --accent-text: #c4b5fd; }
+  :root:not([data-mode="light"]):not([data-mode="dark"])[data-theme="rose"] { --accent: #f472b6; --accent-soft: #3a1426; --accent-text: #f9a8d4; }
+  :root:not([data-mode="light"]):not([data-mode="dark"])[data-theme="slate"] { --accent: #94a3b8; --accent-soft: #1f2530; --accent-text: #cbd5e1; }
 }
+:root[data-mode="dark"][data-theme="ocean"] { --accent: #38bdf8; --accent-soft: #0c2a3a; --accent-text: #7dd3fc; }
+:root[data-mode="dark"][data-theme="forest"] { --accent: #4ade80; --accent-soft: #0f2a1a; --accent-text: #86efac; }
+:root[data-mode="dark"][data-theme="grape"] { --accent: #a78bfa; --accent-soft: #241a3a; --accent-text: #c4b5fd; }
+:root[data-mode="dark"][data-theme="rose"] { --accent: #f472b6; --accent-soft: #3a1426; --accent-text: #f9a8d4; }
+:root[data-mode="dark"][data-theme="slate"] { --accent: #94a3b8; --accent-soft: #1f2530; --accent-text: #cbd5e1; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -277,6 +301,18 @@ table.files .lock { color: var(--accent-text); margin-left: 6px; font-size: 11px
 /* ---------- settings ---------- */
 .settings-section { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; margin: 6px 0 -4px; }
 .settings-section:first-child { margin-top: 0; }
+/* 分段选择器（外观模式：跟随系统 / 浅色 / 深色） */
+.seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.seg-btn {
+  flex: 1; padding: 7px 10px; font-size: 13px; font-family: inherit;
+  background: var(--bg-elev); color: var(--text-dim);
+  border: none; border-left: 1px solid var(--border); cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-btn:first-child { border-left: none; }
+.seg-btn:hover { background: var(--bg-hover); }
+.seg-btn.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+
 .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .theme-swatch {
   display: flex; align-items: center; gap: 8px;
