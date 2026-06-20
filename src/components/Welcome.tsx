@@ -6,6 +6,7 @@ interface Props {
   onOpenRecent: (path: string) => void;
   onCompressFiles: () => void;
   onCompressFolder: () => void;
+  onBrowse: () => void;
 }
 
 export function Welcome(p: Props) {
@@ -18,6 +19,9 @@ export function Welcome(p: Props) {
         <div className="actions">
           <button className="btn primary" onClick={p.onOpen} disabled={p.loading}>
             打开归档…
+          </button>
+          <button className="btn" onClick={p.onBrowse} disabled={p.loading}>
+            浏览文件…
           </button>
           <button className="btn" onClick={p.onCompressFiles} disabled={p.loading}>
             压缩文件…

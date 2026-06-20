@@ -22,9 +22,15 @@
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["mica", "underWindowBackground"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
+    "macOSPrivateApi": true,
     "security": {
       "csp": null
     }
