@@ -102,13 +102,31 @@ pub fn detect_format(path: &Path) -> anyhow::Result<Format> {
     } else {
         None
     };
-    if let Some(f) = by_ext {
-        return Ok(f);
-    }
 
-    // Fall back to magic bytes.
+    // 先按扩展名，取不到再看魔数。魔数还能识别无扩展名的裸 tar（ustar 魔数在偏移 257）。
+    let prelim = match by_ext {
+        Some(f) => f,
+        None => detect_by_magic(path)?,
+    };
+
+    // Linux/UNIX 常见做法是「先 tar 打包再压缩」。若单层压缩（.gz/.bz2/.xz/.zst，
+    // 或仅凭魔数判定）的解压内容其实是个 tar，则升级为对应的 tar.* 复合格式，
+    // 这样即便文件名只是 foo.zst / foo.gz，也能直接展开里面的目录树而非当成单文件。
+    let upgraded = match prelim {
+        Format::Gz => upgrade_if_tar(path, Format::Gz, Format::TarGz),
+        Format::Bz2 => upgrade_if_tar(path, Format::Bz2, Format::TarBz2),
+        Format::Xz => upgrade_if_tar(path, Format::Xz, Format::TarXz),
+        Format::Zst => upgrade_if_tar(path, Format::Zst, Format::TarZst),
+        other => other,
+    };
+    Ok(upgraded)
+}
+
+/// 仅凭文件头魔数判定格式（无扩展名/扩展名不符时用）。
+fn detect_by_magic(path: &Path) -> anyhow::Result<Format> {
     use std::io::Read;
-    let mut head = [0u8; 8];
+    // 读 512 字节：既覆盖各压缩格式的短魔数，也够检查偏移 257 处的 tar「ustar」魔数。
+    let mut head = [0u8; 512];
     let n = std::fs::File::open(path)?.read(&mut head)?;
     let head = &head[..n];
     let f = if head.starts_with(b"PK\x03\x04") || head.starts_with(b"PK\x05\x06") {
@@ -125,10 +143,43 @@ pub fn detect_format(path: &Path) -> anyhow::Result<Format> {
         Format::Xz
     } else if head.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
         Format::Zst
+    } else if is_tar_header(head) {
+        Format::Tar
     } else {
-        anyhow::bail!("无法识别的归档格式: {}", path.display())
+        anyhow::bail!("无法识别的归档格式: {}", path.display());
     };
     Ok(f)
+}
+
+/// tar 头部（POSIX ustar / GNU）在偏移 257 处含 "ustar" 魔数。
+fn is_tar_header(buf: &[u8]) -> bool {
+    buf.len() >= 262 && &buf[257..262] == b"ustar"
+}
+
+/// 若 `single` 单层压缩解出来的开头是个 tar，则返回 `tar_variant`，否则返回 `single`。
+/// 只读前 512 字节解压结果，代价很低；任何读取/解压错误都安全回退到 `single`。
+fn upgrade_if_tar(path: &Path, single: Format, tar_variant: Format) -> Format {
+    match decompressed_head(path, single, 512) {
+        Ok(head) if is_tar_header(&head) => tar_variant,
+        _ => single,
+    }
+}
+
+/// 用与 `single` 对应的解码器解压出至多 `n` 字节。
+fn decompressed_head(path: &Path, single: Format, n: usize) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut r = list::open_decompressor(path, single)?;
+    let mut buf = vec![0u8; n];
+    let mut filled = 0;
+    while filled < n {
+        let m = r.read(&mut buf[filled..])?;
+        if m == 0 {
+            break;
+        }
+        filled += m;
+    }
+    buf.truncate(filled);
+    Ok(buf)
 }
 
 /// Sanitize an entry path coming from an archive: strip absolute prefixes and `..`.

@@ -289,3 +289,87 @@ fn list_single(path: &Path, _format: Format) -> anyhow::Result<ArchiveInfo> {
     });
     Ok(info)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::passwords::LazyPasswords;
+    use std::io::Write;
+
+    fn make_tar() -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let data = b"hello world";
+        let mut h = tar::Header::new_gnu();
+        h.set_size(data.len() as u64);
+        h.set_mode(0o644);
+        h.set_cksum();
+        b.append_data(&mut h, "dir/file.txt", &data[..]).unwrap();
+        b.into_inner().unwrap()
+    }
+
+    fn opts() -> ListOptions {
+        ListOptions {
+            password: None,
+            encoding: "auto".into(),
+            fallback_passwords: LazyPasswords::new(|| Vec::<String>::new()),
+        }
+    }
+
+    fn write_temp(name: &str, bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(name);
+        std::fs::write(&p, bytes).unwrap();
+        (dir, p)
+    }
+
+    #[test]
+    fn lists_inner_of_tar_gz() {
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&make_tar()).unwrap();
+        let (_d, p) = write_temp("a.tar.gz", &gz.finish().unwrap());
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "TAR.GZ");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    #[test]
+    fn lists_inner_of_tar_zst() {
+        let zst = zstd::encode_all(&make_tar()[..], 3).unwrap();
+        let (_d, p) = write_temp("a.tar.zst", &zst);
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "TAR.ZST");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    // 文件名只有 .gz（不含 .tar），但内容其实是 tar：应嗅探升级为 TAR.GZ 并展开目录树。
+    #[test]
+    fn sniffs_tar_inside_bare_gz() {
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&make_tar()).unwrap();
+        let (_d, p) = write_temp("backup.gz", &gz.finish().unwrap());
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "TAR.GZ");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    #[test]
+    fn sniffs_tar_inside_bare_zst() {
+        let zst = zstd::encode_all(&make_tar()[..], 3).unwrap();
+        let (_d, p) = write_temp("backup.zst", &zst);
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "TAR.ZST");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    // 真正的单文件 gzip（内容不是 tar）应保持单文件视图，不被误判为 tar。
+    #[test]
+    fn plain_gz_stays_single() {
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(b"just some plain text, definitely not a tar archive header").unwrap();
+        let (_d, p) = write_temp("notes.txt.gz", &gz.finish().unwrap());
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "GZ");
+        assert_eq!(info.entries.len(), 1);
+        assert_eq!(info.entries[0].path, "notes.txt");
+    }
+}

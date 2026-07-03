@@ -366,6 +366,18 @@ export function SettingsDialog(p: {
           <div className="hint">自动跳过 .DS_Store、__MACOSX、._ 资源派生、Thumbs.db、desktop.ini 等。</div>
         </span>
       </label>
+
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={s.openAfterExtract}
+          onChange={(e) => p.onChange({ openAfterExtract: e.target.checked })}
+        />
+        <span className="grow">
+          解压后打开目标文件夹
+          <div className="hint">解压完成后自动在资源管理器 / 访达中打开解压出的目录。</div>
+        </span>
+      </label>
     </Modal>
   );
 }
@@ -923,12 +935,18 @@ export function ShellIntegration(p: { onClose: () => void; toast: (kind: "ok" | 
       }
     >
       <p style={{ marginTop: 0 }}>
-        安装后，在{where}中右键所选文件或文件夹即可使用：
+        安装后，在{where}中右键所选文件或文件夹即可压缩：
       </p>
       <ul style={{ lineHeight: 1.9, paddingLeft: 20 }}>
         <li>用 Origami 压缩为 ZIP</li>
         <li>用 Origami 压缩为 7Z</li>
         <li>用 Origami 压缩（详细设置…）— 自定义格式、级别、密码与分卷</li>
+      </ul>
+      <p style={{ marginBottom: 4 }}>右键压缩包时还可解压：</p>
+      <ul style={{ lineHeight: 1.9, paddingLeft: 20 }}>
+        <li>解压到当前文件夹（原地解压）</li>
+        <li>解压到单独文件夹（同名子目录）</li>
+        <li>解压到…（选择位置）</li>
       </ul>
       <p className="hint" style={{ opacity: 0.7, fontSize: 12 }}>
         状态：{installed === null ? "检查中…" : installed ? "✓ 已安装" : "未安装"}。

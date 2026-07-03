@@ -13,6 +13,7 @@ export interface Settings {
   effects: boolean; // 窗口材质（Win11 Mica / macOS 毛玻璃）
   level: number; // 默认压缩等级 0(仅存储)..9(最高)
   excludeJunk: boolean; // 压缩时剔除 .DS_Store / __MACOSX / Thumbs.db 等
+  openAfterExtract: boolean; // 解压完成后打开目标目录
 }
 
 // [key, 显示名]。深浅配色在 styles.css 里按 data-mode 与 prefers-color-scheme 切换。
@@ -45,7 +46,7 @@ export const SCALE_MIN = 0.7;
 export const SCALE_MAX = 1.8;
 export const SCALE_STEP = 0.1;
 
-const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", effects: true, level: 6, excludeJunk: true };
+const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", effects: true, level: 6, excludeJunk: true, openAfterExtract: true };
 
 export function clampScale(s: number): number {
   return Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(s * 10) / 10));
@@ -66,6 +67,8 @@ export function loadSettings(): Settings {
       effects: typeof raw.effects === "boolean" ? raw.effects : DEFAULTS.effects,
       level: typeof raw.level === "number" ? clampLevel(raw.level) : DEFAULTS.level,
       excludeJunk: typeof raw.excludeJunk === "boolean" ? raw.excludeJunk : DEFAULTS.excludeJunk,
+      openAfterExtract:
+        typeof raw.openAfterExtract === "boolean" ? raw.openAfterExtract : DEFAULTS.openAfterExtract,
     };
   } catch {
     return { ...DEFAULTS };
