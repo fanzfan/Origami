@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, Progress } from "../api";
 import { loadSettings } from "../settings";
 
@@ -11,6 +12,8 @@ export function MiniProgress() {
   const [prog, setProg] = useState<Progress | null>(null);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 当前批次动词："压缩" / "解压"，用于标题与提示文案。
+  const [verb, setVerb] = useState("压缩");
   const jobRef = useRef<string | null>(null);
   const started = useRef(false);
 
@@ -32,17 +35,28 @@ export function MiniProgress() {
     (async () => {
       const settings = loadSettings();
       const actions = await api.takePendingActions();
-      const quick = actions.filter(
+      const creates = actions.filter(
         (a): a is { kind: "create"; format: string; paths: string[] } =>
           a.kind === "create" && a.format !== "ask",
       );
-      if (quick.length === 0) {
+      const extracts = actions.filter(
+        (a): a is { kind: "extract"; mode: string; paths: string[] } =>
+          a.kind === "extract" && a.mode !== "ask",
+      );
+      if (creates.length === 0 && extracts.length === 0) {
         await api.endQuickJob(true);
         return;
       }
+      // 批次通常只含一种动作（右键菜单一次一项）；有解压则标题显示「解压」。
+      const label = extracts.length > 0 && creates.length === 0 ? "解压" : "压缩";
+      setVerb(label);
+
       let ok = true;
       let lastErr = "";
-      for (const a of quick) {
+      // 遇到需要密码等交互的归档，转交主窗打开。
+      const needMain: string[] = [];
+
+      for (const a of creates) {
         const jobId = newJobId();
         jobRef.current = jobId;
         try {
@@ -63,13 +77,41 @@ export function MiniProgress() {
           }
         }
       }
+
+      for (const a of extracts) {
+        for (const path of a.paths) {
+          const jobId = newJobId();
+          jobRef.current = jobId;
+          try {
+            const dest = await api.quickExtractDest(path, a.mode);
+            const out = await api.extractArchive({ jobId, path, dest, smart: false });
+            if (settings.openAfterExtract) openPath(out).catch(() => {});
+          } catch (e) {
+            const msg = String(e);
+            if (msg === "CANCELLED") {
+              // 用户主动取消，不算失败。
+            } else if (msg === "PASSWORD_REQUIRED") {
+              needMain.push(path); // 需要输入密码，交给主窗
+            } else {
+              ok = false;
+              lastErr = msg;
+            }
+          }
+        }
+      }
+
+      // 有归档需要密码：显示主窗并打开它，让用户在应用内输入密码后解压。
+      if (needMain.length > 0) {
+        await api.requestOpenInMain(needMain);
+        await api.endQuickJob(true); // 存在待处理动作，endQuickJob 不会退出，主窗保留
+        return;
+      }
+
       if (ok) {
         setDone(true);
-        // 不再自动「在资源管理器中显示」：右键快捷压缩时用户本就在源文件夹，
-        // 产物就在同一目录，再弹新窗口反而打扰。
         await new Promise((r) => setTimeout(r, 800));
       } else {
-        setError(lastErr || "压缩失败");
+        setError(lastErr || `${label}失败`);
         // 出错时多停留片刻让用户看到信息，随后由主窗接管报错。
         await new Promise((r) => setTimeout(r, 1800));
       }
@@ -82,7 +124,7 @@ export function MiniProgress() {
   return (
     <div className="mini-progress" data-tauri-drag-region>
       <div className="mini-title">
-        {error ? "压缩失败" : done ? "压缩完成 ✓" : "正在压缩…"}
+        {error ? `${verb}失败` : done ? `${verb}完成 ✓` : `正在${verb}…`}
       </div>
       <div
         className={`progressbar ${pct === null && !done && !error ? "indeterminate" : ""}`}

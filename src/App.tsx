@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { api, ARCHIVE_EXTS, ArchiveInfo, DirListing, isArchive, newJobId, Progress } from "./api";
 import { Welcome } from "./components/Welcome";
 import { Browser } from "./components/Browser";
@@ -257,6 +257,37 @@ export default function App() {
     [toast, settings.level, settings.excludeJunk],
   );
 
+  /** 快捷解压（主窗可见时用应用内进度）。返回是否成功（取消视为成功）。 */
+  const quickExtract = useCallback(
+    async (mode: string, path: string, useMini: boolean) => {
+      const jobId = newJobId();
+      try {
+        const dest = await api.quickExtractDest(path, mode);
+        if (!useMini) setJob({ jobId, title: "正在解压…", progress: null });
+        const out = await api.extractArchive({ jobId, path, dest, smart: false });
+        toast("ok", `解压完成：${out.split(/[\\/]/).pop()}`);
+        if (settings.openAfterExtract) openPath(out).catch(() => {});
+        return true;
+      } catch (e) {
+        const msg = String(e);
+        if (msg === "CANCELLED") {
+          toast("info", "已取消");
+          return true;
+        }
+        if (msg === "PASSWORD_REQUIRED") {
+          // 加密归档：主窗可见，直接打开它，让用户输入密码后在应用内解压。
+          openArchive(path);
+          return true;
+        }
+        toast("error", `解压失败：${msg}`);
+        return false;
+      } finally {
+        if (!useMini) setJob(null);
+      }
+    },
+    [toast, settings.openAfterExtract, openArchive],
+  );
+
   const draining = useRef(false);
   const drainActions = useCallback(async () => {
     if (draining.current) return; // 进行中的循环会在下一轮取走新动作
@@ -269,7 +300,8 @@ export default function App() {
       for (;;) {
         const actions = await api.takePendingActions();
         if (actions.length === 0) break;
-        const quick: { format: string; paths: string[] }[] = [];
+        const quickCreates: { format: string; paths: string[] }[] = [];
+        const quickExtracts: { mode: string; path: string }[] = [];
         for (const a of actions) {
           if (a.kind === "open") {
             // 与窗口内拖放一致：单个归档 → 打开；其它（普通文件 / 文件夹 / 多个文件，
@@ -279,17 +311,26 @@ export default function App() {
             } else if (a.paths.length > 0) {
               setCreateFor(a.paths);
             }
-          } else if (a.format === "ask") {
-            setCreateFor(a.paths);
-          } else {
-            quick.push(a);
+          } else if (a.kind === "create") {
+            if (a.format === "ask") setCreateFor(a.paths);
+            else quickCreates.push(a);
+          } else if (a.kind === "extract") {
+            // "ask" → 打开归档，用应用内解压对话框自选位置；其它 → 逐个快捷解压。
+            if (a.mode === "ask") {
+              if (a.paths[0]) openArchive(a.paths[0]);
+            } else {
+              for (const p of a.paths) quickExtracts.push({ mode: a.mode, path: p });
+            }
           }
         }
-        if (quick.length > 0) {
+        if (quickCreates.length > 0 || quickExtracts.length > 0) {
           const useMini = await api.beginQuickJob();
           let ok = true;
-          for (const a of quick) {
+          for (const a of quickCreates) {
             ok = (await quickCreate(a.format, a.paths, useMini)) && ok;
+          }
+          for (const e of quickExtracts) {
+            ok = (await quickExtract(e.mode, e.path, useMini)) && ok;
           }
           if (useMini) {
             // 让迷你窗口的 100% 状态停留一瞬
@@ -301,7 +342,7 @@ export default function App() {
     } finally {
       draining.current = false;
     }
-  }, [openArchive, quickCreate]);
+  }, [openArchive, quickCreate, quickExtract]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -352,7 +393,7 @@ export default function App() {
           smart,
         });
         toast("ok", "解压完成");
-        revealItemInDir(out).catch(() => {});
+        if (settings.openAfterExtract) openPath(out).catch(() => {});
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", "已取消");
@@ -375,7 +416,7 @@ export default function App() {
                 smart,
               });
               toast("ok", "解压完成");
-              revealItemInDir(out).catch(() => {});
+              if (settings.openAfterExtract) openPath(out).catch(() => {});
             } catch (e2) {
               toast("error", `解压失败：${e2}`);
             }
@@ -385,7 +426,7 @@ export default function App() {
         setJob(null);
       }
     },
-    [archivePath, password, encoding, toast, askPassword],
+    [archivePath, password, encoding, toast, askPassword, settings.openAfterExtract],
   );
 
   const runCreate = useCallback(
@@ -527,11 +568,9 @@ export default function App() {
             🏠 主页
           </button>
         )}
-        {!isWin && (
-          <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
-            🧩
-          </button>
-        )}
+        <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
+          🧩
+        </button>
         <button className="btn ghost sm" onClick={() => setShowAssoc(true)} title="文件关联">
           🔗
         </button>

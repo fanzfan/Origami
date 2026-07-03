@@ -118,6 +118,9 @@ export const api = {
     invoke<string>("extract_entry_to_temp", { ...p }),
 
   defaultExtractDir: (path: string) => invoke<string>("default_extract_dir", { path }),
+  quickExtractDest: (path: string, mode: string) =>
+    invoke<string>("quick_extract_dest", { path, mode }),
+  requestOpenInMain: (paths: string[]) => invoke<void>("request_open_in_main", { paths }),
   listDir: (path?: string) => invoke<DirListing>("list_dir", { path }),
   defaultCreateDest: (sources: string[], ext: string) =>
     invoke<string>("default_create_dest", { sources, ext }),
@@ -165,7 +168,8 @@ export interface DirListing {
 
 export type PendingAction =
   | { kind: "open"; paths: string[] }
-  | { kind: "create"; format: string; paths: string[] };
+  | { kind: "create"; format: string; paths: string[] }
+  | { kind: "extract"; mode: string; paths: string[] };
 
 export function fmtSize(n: number): string {
   if (n === 0) return "0 B";

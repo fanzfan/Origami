@@ -21,7 +21,7 @@
   <Identity
     Name="Origami.ShellExtension"
     Publisher="CN=Origami Local Signing"
-    Version="1.0.0.0"
+    Version="1.0.2.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
@@ -57,10 +57,13 @@
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:SurrogateServer DisplayName="Origami Context Menu">
-              <com:Class
-                Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01"
-                Path="origami_explorer_command.dll"
-                ThreadingModel="STA" />
+              <!-- 六个平铺的顶层命令，各一个 CLSID，都由同一个 DLL 提供。 -->
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E11" Path="origami_explorer_command.dll" ThreadingModel="STA" />
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E12" Path="origami_explorer_command.dll" ThreadingModel="STA" />
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E13" Path="origami_explorer_command.dll" ThreadingModel="STA" />
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E21" Path="origami_explorer_command.dll" ThreadingModel="STA" />
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E22" Path="origami_explorer_command.dll" ThreadingModel="STA" />
+              <com:Class Id="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E23" Path="origami_explorer_command.dll" ThreadingModel="STA" />
             </com:SurrogateServer>
           </com:ComServer>
         </com:Extension>
@@ -68,14 +71,25 @@
         <!-- 挂到文件、文件夹、文件夹背景的新版右键菜单。 -->
         <desktop4:Extension Category="windows.fileExplorerContextMenus">
           <desktop4:FileExplorerContextMenus>
+            <!-- 文件：三个压缩项 + 三个解压项（解压项由 DLL 的 GetState 对非压缩包返回 ECS_HIDDEN）。 -->
             <desktop5:ItemType Type="*">
-              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+              <desktop5:Verb Id="OrigamiZip" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E11" />
+              <desktop5:Verb Id="Origami7z" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E12" />
+              <desktop5:Verb Id="OrigamiAsk" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E13" />
+              <desktop5:Verb Id="OrigamiExtractHere" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E21" />
+              <desktop5:Verb Id="OrigamiExtractFolder" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E22" />
+              <desktop5:Verb Id="OrigamiExtractAsk" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E23" />
             </desktop5:ItemType>
+            <!-- 文件夹 / 文件夹背景：仅压缩项。 -->
             <desktop5:ItemType Type="Directory">
-              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+              <desktop5:Verb Id="OrigamiZip" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E11" />
+              <desktop5:Verb Id="Origami7z" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E12" />
+              <desktop5:Verb Id="OrigamiAsk" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E13" />
             </desktop5:ItemType>
             <desktop5:ItemType Type="Directory\Background">
-              <desktop5:Verb Id="OrigamiCompress" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E01" />
+              <desktop5:Verb Id="OrigamiZip" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E11" />
+              <desktop5:Verb Id="Origami7z" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E12" />
+              <desktop5:Verb Id="OrigamiAsk" Clsid="6B3D8A1C-4F2E-4C7A-9E1D-7A2B5C8D9E13" />
             </desktop5:ItemType>
           </desktop4:FileExplorerContextMenus>
         </desktop4:Extension>

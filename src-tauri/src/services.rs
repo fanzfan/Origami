@@ -8,13 +8,36 @@ use std::path::PathBuf;
 
 pub struct ServiceDef {
     pub menu_title: &'static str,
-    pub format: &'static str,
+    /// 深链主机："create"（压缩）/"extract"（解压）。
+    pub url_base: &'static str,
+    /// 深链查询参数键值，如 "format=zip" 或 "mode=here"。
+    pub param: &'static str,
+    /// NSSendFileTypes：限定右键菜单在哪些文件类型上出现。
+    pub send_types: &'static [&'static str],
 }
 
+/// 压缩服务对所有条目可用。
+const ANY: &[&str] = &["public.item"];
+
+/// 解压服务仅对常见归档类型出现（缺少系统 UTI 的格式如 .7z/.zst 退化为不显示，
+/// 用户仍可在应用内打开）。
+const ARCHIVE_TYPES: &[&str] = &[
+    "public.zip-archive",
+    "public.tar-archive",
+    "org.gnu.gnu-zip-archive",
+    "public.bzip2-archive",
+    "com.rarlab.rar-archive",
+    "org.7-zip.7-zip-archive",
+    "public.archive",
+];
+
 pub const SERVICES: &[ServiceDef] = &[
-    ServiceDef { menu_title: "用 Origami 压缩为 ZIP", format: "zip" },
-    ServiceDef { menu_title: "用 Origami 压缩为 7Z", format: "7z" },
-    ServiceDef { menu_title: "用 Origami 压缩（详细设置…）", format: "ask" },
+    ServiceDef { menu_title: "用 Origami 压缩为 ZIP", url_base: "create", param: "format=zip", send_types: ANY },
+    ServiceDef { menu_title: "用 Origami 压缩为 7Z", url_base: "create", param: "format=7z", send_types: ANY },
+    ServiceDef { menu_title: "用 Origami 压缩（详细设置…）", url_base: "create", param: "format=ask", send_types: ANY },
+    ServiceDef { menu_title: "用 Origami 解压到当前文件夹", url_base: "extract", param: "mode=here", send_types: ARCHIVE_TYPES },
+    ServiceDef { menu_title: "用 Origami 解压到单独文件夹", url_base: "extract", param: "mode=folder", send_types: ARCHIVE_TYPES },
+    ServiceDef { menu_title: "用 Origami 解压到…（选择位置）", url_base: "extract", param: "mode=ask", send_types: ARCHIVE_TYPES },
 ];
 
 fn services_dir() -> anyhow::Result<PathBuf> {
@@ -26,9 +49,9 @@ fn workflow_path(s: &ServiceDef) -> anyhow::Result<PathBuf> {
     Ok(services_dir()?.join(format!("{}.workflow", s.menu_title)))
 }
 
-fn shell_script(format: &str) -> String {
+fn shell_script(url_base: &str, param: &str) -> String {
     format!(
-        r#"url="origami://create?format={format}"
+        r#"url="origami://{url_base}?{param}"
 for f in "$@"; do
   b=$(printf %s "$f" | /usr/bin/base64 | /usr/bin/tr -d '\n' | /usr/bin/sed -e 's/+/-/g' -e 's,/,_,g' -e 's/=//g')
   url="$url&p=$b"
@@ -42,7 +65,12 @@ fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-fn info_plist(menu_title: &str) -> String {
+fn info_plist(menu_title: &str, send_types: &[&str]) -> String {
+    let types_xml = send_types
+        .iter()
+        .map(|t| format!("        <string>{t}</string>"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,18 +97,19 @@ fn info_plist(menu_title: &str) -> String {
       </dict>
       <key>NSSendFileTypes</key>
       <array>
-        <string>public.item</string>
+{types}
       </array>
     </dict>
   </array>
 </dict>
 </plist>
 "#,
-        title = xml_escape(menu_title)
+        title = xml_escape(menu_title),
+        types = types_xml,
     )
 }
 
-fn document_wflow(format: &str) -> String {
+fn document_wflow(s: &ServiceDef) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -301,8 +330,8 @@ fn document_wflow(format: &str) -> String {
 </dict>
 </plist>
 "#,
-        script = xml_escape(&shell_script(format)),
-        format_pad = uuid_pad(format),
+        script = xml_escape(&shell_script(s.url_base, s.param)),
+        format_pad = uuid_pad(s.param),
         icon_b64 = menu_icon_b64(),
     )
 }
@@ -313,10 +342,10 @@ fn menu_icon_b64() -> String {
         .encode(include_bytes!("../icons/menu.icns"))
 }
 
-/// 用 format 名生成稳定的 12 位十六进制尾段，保证三个工作流 UUID 互不相同。
-fn uuid_pad(format: &str) -> String {
+/// 用参数键值生成稳定的 12 位十六进制尾段，保证各工作流 UUID 互不相同。
+fn uuid_pad(key: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in format.bytes() {
+    for b in key.bytes() {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
@@ -328,8 +357,8 @@ pub fn install() -> anyhow::Result<()> {
         let wf = workflow_path(s)?;
         let contents = wf.join("Contents");
         std::fs::create_dir_all(&contents)?;
-        std::fs::write(contents.join("Info.plist"), info_plist(s.menu_title))?;
-        std::fs::write(contents.join("document.wflow"), document_wflow(s.format))?;
+        std::fs::write(contents.join("Info.plist"), info_plist(s.menu_title, s.send_types))?;
+        std::fs::write(contents.join("document.wflow"), document_wflow(s))?;
         // pbs 仅注册服务，不会自动启用右键菜单展示；Automator 保存时写的就是这条记录
         let key = format!("\"(null) - {} - runWorkflowAsService\"", s.menu_title);
         let _ = std::process::Command::new("defaults")

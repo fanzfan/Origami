@@ -47,6 +47,8 @@ impl Jobs {
 pub enum PendingAction {
     Open { paths: Vec<String> },
     Create { format: String, paths: Vec<String> },
+    /// 右键快捷解压。mode: "here"（解压到当前文件夹）/"folder"（解压到同名子文件夹）/"ask"（打开归档自行选择）。
+    Extract { mode: String, paths: Vec<String> },
 }
 
 #[derive(Default)]
@@ -56,17 +58,25 @@ pub struct Pending(Mutex<Vec<PendingAction>>);
 #[derive(Default)]
 pub struct QuickLaunch(AtomicBool);
 
-/// 解析 origami://create?format=zip&p=<base64url(path)>&p=… 深链。
+/// 解析深链：
+///   origami://create?format=zip&p=<base64url(path)>&p=…   → 快捷压缩
+///   origami://extract?mode=here&p=<base64url(path)>&p=…    → 快捷解压
 fn parse_deep_link(url: &tauri::Url) -> Option<PendingAction> {
     use base64::Engine;
-    if url.scheme() != "origami" || url.host_str() != Some("create") {
+    if url.scheme() != "origami" {
+        return None;
+    }
+    let host = url.host_str()?;
+    if host != "create" && host != "extract" {
         return None;
     }
     let mut format = String::from("ask");
+    let mut mode = String::from("ask");
     let mut paths = Vec::new();
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
             "format" => format = v.to_string(),
+            "mode" => mode = v.to_string(),
             "p" => {
                 if let Ok(bytes) =
                     base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(v.as_bytes())
@@ -81,6 +91,8 @@ fn parse_deep_link(url: &tauri::Url) -> Option<PendingAction> {
     }
     if paths.is_empty() {
         None
+    } else if host == "extract" {
+        Some(PendingAction::Extract { mode, paths })
     } else {
         Some(PendingAction::Create { format, paths })
     }
@@ -93,9 +105,12 @@ fn dispatch_actions(app: &tauri::AppHandle, actions: Vec<PendingAction>) {
     if actions.is_empty() {
         return;
     }
-    let all_quick = actions
-        .iter()
-        .all(|a| matches!(a, PendingAction::Create { format, .. } if format != "ask"));
+    // 全部是「无需交互」的快捷动作（压缩非 ask、解压非 ask）时，用迷你窗静默驱动。
+    let all_quick = actions.iter().all(|a| match a {
+        PendingAction::Create { format, .. } => format != "ask",
+        PendingAction::Extract { mode, .. } => mode != "ask",
+        PendingAction::Open { .. } => false,
+    });
     let main = app.get_webview_window("main");
     let main_visible = main
         .as_ref()
@@ -762,6 +777,32 @@ fn default_extract_dir(path: String) -> String {
         .unwrap_or(path)
 }
 
+/// 快捷解压的目标目录：
+/// - "folder"：源同目录下、以归档去扩展名后的名字建子文件夹（解压到「同名文件夹」）。
+/// - 其它（"here"）：源所在目录（原地解压）。
+/// 解压时统一 smart=false，行为确定，与主流软件的「解压到当前/单独文件夹」一致。
+#[tauri::command]
+fn quick_extract_dest(path: String, mode: String) -> String {
+    let p = PathBuf::from(&path);
+    let parent = p
+        .parent()
+        .map(|x| x.to_path_buf())
+        .unwrap_or_else(|| p.clone());
+    let dest = if mode == "folder" {
+        parent.join(archive::extract::archive_stem(&p))
+    } else {
+        parent
+    };
+    dest.to_string_lossy().to_string()
+}
+
+/// 从迷你窗把归档转交主窗打开（用于快捷解压遇到需要密码等需交互的场景）。
+/// 显示主窗并入队一个 Open 动作，主窗的 drain 逻辑会据此打开归档。
+#[tauri::command]
+fn request_open_in_main(app: tauri::AppHandle, paths: Vec<String>) {
+    dispatch_actions(&app, vec![PendingAction::Open { paths }]);
+}
+
 // ---------------- 文件系统浏览（应用内文件管理器） ----------------
 
 #[derive(serde::Serialize)]
@@ -912,6 +953,8 @@ pub fn run() {
             system_auth,
             extract_entry_to_temp,
             default_extract_dir,
+            quick_extract_dest,
+            request_open_in_main,
             default_create_dest,
             list_dir,
             take_pending_actions,

@@ -1,17 +1,15 @@
 //! Origami 资源管理器右键菜单（IExplorerCommand 进程内 COM 服务器）。
 //!
-//! 实现 Windows 11「新版右键菜单」顶层项「用 Origami 压缩 ▸」及其三个子项。
-//! 子项 Invoke 时启动同目录的 Origami.exe：
-//!   Origami.exe --compress=<zip|7z|ask> "<选中路径>" ...
+//! 实现 Windows 11「新版右键菜单」的顶层项 —— 各动作**直接平铺**在右键菜单里
+//! （不套「用 Origami 压缩 ▸」级联子菜单，少一层）：
+//!   Origami 压缩为 ZIP / 7Z / 详细设置        → Origami.exe --compress=<zip|7z|ask> "<路径>" …
+//!   Origami 解压到当前文件夹 / 单独文件夹 / …  → Origami.exe --extract=<here|folder|ask> "<路径>" …
+//! 解压项仅在选中项全是压缩包时显示（GetState 动态返回 ECS_HIDDEN）。
 //! 主程序的单实例逻辑（src-tauri/src/cli.rs）会把它们汇入运行中的实例。
 //!
-//! 此 DLL 必须随一个 **MSIX 稀疏包** 注册，且包必须经过签名（自签名+本机信任
-//! 即可用于开发；分发需 Authenticode/受信任证书）。注册方式见 ../README.md。
-//!
-//! 注意：本文件按 `windows` crate 0.58 的接口签名编写，已在 Windows 上编译通过
-//! （依赖 `windows` 的 `implement` 特性）。换 crate 版本时 IExplorerCommand_Impl 等
-//! trait 的方法签名（shell 项参数 Option<&IShellItemArray>、CreateInstance 的
-//! Option<&IUnknown>、Skip/Reset 的 Result<()> 等）可能需要再次微调。
+//! 每个动作是一个独立的顶层命令，对应各自的 CLSID，全部由本 DLL 提供，
+//! 并在 AppxManifest.xml 里各注册一条 Verb。换 windows crate 版本时
+//! IExplorerCommand_Impl 等 trait 的方法签名可能需要再次微调（本文件按 0.58 编写）。
 
 #![allow(non_snake_case)]
 
@@ -26,8 +24,43 @@ use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-/// 本 COM 服务器的 CLSID（须与 AppxManifest.xml 中一致）。
-pub const CLSID_ORIGAMI_COMMAND: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e01);
+// 六个顶层命令的 CLSID（须与 AppxManifest.xml 中一致）。
+const CLSID_ZIP: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e11);
+const CLSID_7Z: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e12);
+const CLSID_ASK: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e13);
+const CLSID_HERE: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e21);
+const CLSID_FOLDER: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e22);
+const CLSID_EXTRACT_ASK: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e23);
+
+/// 一个顶层命令的定义。
+struct CmdDef {
+    clsid: GUID,
+    title: &'static str,
+    /// 完整命令行开关，如 "--compress=zip" / "--extract=here"。
+    arg: &'static str,
+    /// 仅当选中项全为压缩包时显示（解压类动作）。
+    archive_only: bool,
+}
+
+const COMMANDS: &[CmdDef] = &[
+    CmdDef { clsid: CLSID_ZIP, title: "Origami 压缩为 ZIP", arg: "--compress=zip", archive_only: false },
+    CmdDef { clsid: CLSID_7Z, title: "Origami 压缩为 7Z", arg: "--compress=7z", archive_only: false },
+    CmdDef { clsid: CLSID_ASK, title: "Origami 压缩（详细设置…）", arg: "--compress=ask", archive_only: false },
+    CmdDef { clsid: CLSID_HERE, title: "Origami 解压到当前文件夹", arg: "--extract=here", archive_only: true },
+    CmdDef { clsid: CLSID_FOLDER, title: "Origami 解压到单独文件夹", arg: "--extract=folder", archive_only: true },
+    CmdDef { clsid: CLSID_EXTRACT_ASK, title: "Origami 解压到…", arg: "--extract=ask", archive_only: true },
+];
+
+/// 视为压缩包的扩展名（决定解压类动作是否对当前选中项显示）。
+const ARCHIVE_EXTS: &[&str] = &[
+    ".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".zst", ".tzst",
+    ".jar", ".apk",
+];
+
+fn is_archive(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    ARCHIVE_EXTS.iter().any(|e| lower.ends_with(e))
+}
 
 static mut DLL_HMODULE: HMODULE = HMODULE(std::ptr::null_mut());
 
@@ -70,12 +103,13 @@ unsafe fn selected_paths(items: Option<&IShellItemArray>) -> Vec<String> {
     out
 }
 
-/// 启动 Origami.exe 执行一次快捷压缩。
-unsafe fn launch(format: &str, items: Option<&IShellItemArray>) -> Result<()> {
+/// 启动 Origami.exe，`flag_arg` 为完整开关（如 "--compress=zip" / "--extract=here"），
+/// 后接选中的所有路径。
+unsafe fn launch(flag_arg: &str, items: Option<&IShellItemArray>) -> Result<()> {
     let Some(exe) = origami_exe() else {
         return Err(E_FAIL.into());
     };
-    let mut params = format!("--compress={format}");
+    let mut params = flag_arg.to_string();
     for p in selected_paths(items) {
         params.push_str(&format!(" \"{p}\""));
     }
@@ -106,16 +140,17 @@ fn title_pwstr(s: &str) -> Result<PWSTR> {
 }
 
 // ---------------------------------------------------------------------------
-// 子命令（zip / 7z / 详细设置）
+// 顶层命令（平铺，无子菜单）
 // ---------------------------------------------------------------------------
 
 #[windows::core::implement(IExplorerCommand)]
-struct SubCommand {
+struct TopCommand {
     title: &'static str,
-    format: &'static str,
+    arg: &'static str,
+    archive_only: bool,
 }
 
-impl IExplorerCommand_Impl for SubCommand_Impl {
+impl IExplorerCommand_Impl for TopCommand_Impl {
     fn GetTitle(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
         title_pwstr(self.title)
     }
@@ -128,11 +163,22 @@ impl IExplorerCommand_Impl for SubCommand_Impl {
     fn GetCanonicalName(&self) -> Result<GUID> {
         Ok(GUID::zeroed())
     }
-    fn GetState(&self, _items: Option<&IShellItemArray>, _slow: BOOL) -> Result<u32> {
-        Ok(ECS_ENABLED.0 as u32)
+    fn GetState(&self, items: Option<&IShellItemArray>, _slow: BOOL) -> Result<u32> {
+        if self.archive_only {
+            // 仅当选中项全部是压缩包才显示，否则隐藏（挂在 Type="*" 上需自行过滤）。
+            let paths = unsafe { selected_paths(items) };
+            let show = !paths.is_empty() && paths.iter().all(|p| is_archive(p));
+            if show {
+                Ok(ECS_ENABLED.0 as u32)
+            } else {
+                Ok(ECS_HIDDEN.0 as u32)
+            }
+        } else {
+            Ok(ECS_ENABLED.0 as u32)
+        }
     }
     fn Invoke(&self, items: Option<&IShellItemArray>, _bind: Option<&IBindCtx>) -> Result<()> {
-        unsafe { launch(self.format, items) }
+        unsafe { launch(self.arg, items) }
     }
     fn GetFlags(&self) -> Result<u32> {
         Ok(ECF_DEFAULT.0 as u32)
@@ -143,115 +189,14 @@ impl IExplorerCommand_Impl for SubCommand_Impl {
 }
 
 // ---------------------------------------------------------------------------
-// 子命令枚举器
-// ---------------------------------------------------------------------------
-
-#[windows::core::implement(IEnumExplorerCommand)]
-struct SubEnum {
-    items: Vec<IExplorerCommand>,
-    index: std::cell::Cell<usize>,
-}
-
-fn make_subcommands() -> Vec<IExplorerCommand> {
-    vec![
-        SubCommand { title: "压缩为 ZIP", format: "zip" }.into(),
-        SubCommand { title: "压缩为 7Z", format: "7z" }.into(),
-        SubCommand { title: "压缩（详细设置…）", format: "ask" }.into(),
-    ]
-}
-
-impl IEnumExplorerCommand_Impl for SubEnum_Impl {
-    fn Next(
-        &self,
-        celt: u32,
-        puielt: *mut Option<IExplorerCommand>,
-        pceltfetched: *mut u32,
-    ) -> HRESULT {
-        let mut fetched = 0u32;
-        let out = unsafe { std::slice::from_raw_parts_mut(puielt, celt as usize) };
-        while fetched < celt {
-            let i = self.index.get();
-            if i >= self.items.len() {
-                break;
-            }
-            out[fetched as usize] = Some(self.items[i].clone());
-            self.index.set(i + 1);
-            fetched += 1;
-        }
-        if !pceltfetched.is_null() {
-            unsafe { *pceltfetched = fetched };
-        }
-        if fetched == celt {
-            S_OK
-        } else {
-            S_FALSE
-        }
-    }
-    fn Skip(&self, celt: u32) -> Result<()> {
-        self.index.set((self.index.get() + celt as usize).min(self.items.len()));
-        Ok(())
-    }
-    fn Reset(&self) -> Result<()> {
-        self.index.set(0);
-        Ok(())
-    }
-    fn Clone(&self) -> Result<IEnumExplorerCommand> {
-        let e: IEnumExplorerCommand = SubEnum {
-            items: self.items.clone(),
-            index: std::cell::Cell::new(self.index.get()),
-        }
-        .into();
-        Ok(e)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 顶层命令「用 Origami 压缩 ▸」
-// ---------------------------------------------------------------------------
-
-#[windows::core::implement(IExplorerCommand)]
-struct CompressRoot;
-
-impl IExplorerCommand_Impl for CompressRoot_Impl {
-    fn GetTitle(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
-        title_pwstr("用 Origami 压缩")
-    }
-    fn GetIcon(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
-        // 可返回 "Origami.exe,0"（资源图标）。此处留空，用默认。
-        Err(E_NOTIMPL.into())
-    }
-    fn GetToolTip(&self, _items: Option<&IShellItemArray>) -> Result<PWSTR> {
-        Err(E_NOTIMPL.into())
-    }
-    fn GetCanonicalName(&self) -> Result<GUID> {
-        Ok(CLSID_ORIGAMI_COMMAND)
-    }
-    fn GetState(&self, _items: Option<&IShellItemArray>, _slow: BOOL) -> Result<u32> {
-        Ok(ECS_ENABLED.0 as u32)
-    }
-    fn Invoke(&self, _items: Option<&IShellItemArray>, _bind: Option<&IBindCtx>) -> Result<()> {
-        // 有子菜单时顶层不直接执行。
-        Ok(())
-    }
-    fn GetFlags(&self) -> Result<u32> {
-        Ok(ECF_HASSUBCOMMANDS.0 as u32)
-    }
-    fn EnumSubCommands(&self) -> Result<IEnumExplorerCommand> {
-        let e: IEnumExplorerCommand = SubEnum {
-            items: make_subcommands(),
-            index: std::cell::Cell::new(0),
-        }
-        .into();
-        Ok(e)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // 类工厂 + DLL 导出
 // ---------------------------------------------------------------------------
 
 #[windows::core::implement(IClassFactory)]
-struct Factory;
+struct Factory {
+    /// 对应 COMMANDS 中的下标，决定生产哪个顶层命令。
+    index: usize,
+}
 
 impl IClassFactory_Impl for Factory_Impl {
     fn CreateInstance(
@@ -263,8 +208,14 @@ impl IClassFactory_Impl for Factory_Impl {
         if outer.is_some() {
             return Err(CLASS_E_NOAGGREGATION.into());
         }
-        let root: IExplorerCommand = CompressRoot.into();
-        unsafe { root.query(iid, object).ok() }
+        let def = &COMMANDS[self.index];
+        let cmd: IExplorerCommand = TopCommand {
+            title: def.title,
+            arg: def.arg,
+            archive_only: def.archive_only,
+        }
+        .into();
+        unsafe { cmd.query(iid, object).ok() }
     }
     fn LockServer(&self, _lock: BOOL) -> Result<()> {
         Ok(())
@@ -287,10 +238,10 @@ extern "system" fn DllGetClassObject(
     ppv: *mut *mut c_void,
 ) -> HRESULT {
     unsafe {
-        if *rclsid != CLSID_ORIGAMI_COMMAND {
+        let Some(index) = COMMANDS.iter().position(|c| c.clsid == *rclsid) else {
             return CLASS_E_CLASSNOTAVAILABLE;
-        }
-        let factory: IClassFactory = Factory.into();
+        };
+        let factory: IClassFactory = Factory { index }.into();
         factory.query(riid, ppv)
     }
 }

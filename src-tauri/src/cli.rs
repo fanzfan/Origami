@@ -8,6 +8,7 @@ use crate::{parse_deep_link, PendingAction};
 
 pub fn parse_args(args: &[String]) -> Vec<PendingAction> {
     let mut format: Option<String> = None;
+    let mut extract: Option<String> = None;
     let mut paths: Vec<String> = Vec::new();
     let mut out: Vec<PendingAction> = Vec::new();
 
@@ -16,6 +17,10 @@ pub fn parse_args(args: &[String]) -> Vec<PendingAction> {
             format = Some(rest.to_string());
         } else if a == "--compress" {
             format = Some("ask".into());
+        } else if let Some(rest) = a.strip_prefix("--extract=") {
+            extract = Some(rest.to_string());
+        } else if a == "--extract" {
+            extract = Some("ask".into());
         } else if a.starts_with("origami://") {
             if let Ok(u) = tauri::Url::parse(a) {
                 if let Some(act) = parse_deep_link(&u) {
@@ -28,9 +33,13 @@ pub fn parse_args(args: &[String]) -> Vec<PendingAction> {
     }
 
     if !paths.is_empty() {
-        match format {
-            Some(f) => out.push(PendingAction::Create { format: f, paths }),
-            None => out.push(PendingAction::Open { paths }),
+        // 优先级：--extract > --compress > 默认打开。右键菜单每次只会传其中一种。
+        if let Some(mode) = extract {
+            out.push(PendingAction::Extract { mode, paths });
+        } else if let Some(f) = format {
+            out.push(PendingAction::Create { format: f, paths });
+        } else {
+            out.push(PendingAction::Open { paths });
         }
     }
     out
