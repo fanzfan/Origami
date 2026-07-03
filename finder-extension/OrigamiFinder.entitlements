@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- FinderSync 扩展必须沙箱化。扩展只读取选中项路径字符串并 open 一个 origami://
+       深链交给主应用，本身不做文件读写，故只需最小沙箱能力。 -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+</dict>
+</plist>
