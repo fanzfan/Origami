@@ -81,8 +81,6 @@ fn info_plist(menu_title: &str, send_types: &[&str]) -> String {
     <dict>
       <key>NSBackgroundColorName</key>
       <string>background</string>
-      <key>NSIconName</key>
-      <string>workflowCustomImage</string>
       <key>NSMenuItem</key>
       <dict>
         <key>default</key>
@@ -300,10 +298,6 @@ fn document_wflow(s: &ServiceDef) -> String {
     <array>
       <string>/System/Library/CoreServices/Finder.app</string>
     </array>
-    <key>customImageFileData</key>
-    <data>{icon_b64}</data>
-    <key>customImageFileExtension</key>
-    <string>icns</string>
     <key>inputTypeIdentifier</key>
     <string>com.apple.Automator.fileSystemObject</string>
     <key>outputTypeIdentifier</key>
@@ -332,14 +326,7 @@ fn document_wflow(s: &ServiceDef) -> String {
 "#,
         script = xml_escape(&shell_script(s.url_base, s.param)),
         format_pad = uuid_pad(s.param),
-        icon_b64 = menu_icon_b64(),
     )
-}
-
-fn menu_icon_b64() -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-        .encode(include_bytes!("../icons/menu.icns"))
 }
 
 /// 用参数键值生成稳定的 12 位十六进制尾段，保证各工作流 UUID 互不相同。
