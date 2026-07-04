@@ -323,6 +323,19 @@ table.files .lock { color: var(--accent-text); margin-left: 6px; font-size: 11px
 .hint { font-size: 12px; color: var(--text-dim); }
 .error-text { color: var(--danger); font-size: 12px; }
 
+/* ask 小窗：卡片铺满整个窗口（沉浸式），无遮罩、无边框拼接感。用 flex 撑满而非 vh/vw
+   （CSS zoom 会二次放大视口单位），故任意界面缩放都不裁内容。窗口尺寸见 AskDialog。 */
+[data-window="ask"] .overlay { background: transparent; align-items: stretch; }
+[data-window="ask"] .modal {
+  flex: 1; /* 横向撑满（overlay 为 flex row），align-items:stretch 纵向撑满 */
+  max-height: none;
+  border: none; border-radius: 0; box-shadow: none;
+}
+/* body 吃掉中间余量并可内部滚动（min-height:0 让它能收缩），footer 固定在底部可见。 */
+[data-window="ask"] .modal .body { flex: 1; min-height: 0; }
+/* 顶部内嵌交通灯浮在卡片左上角，标题下移让开它们；顶栏可拖拽移动窗口。 */
+[data-window="ask"] .modal header { padding-top: 32px; -webkit-app-region: drag; }
+
 /* ---------- settings ---------- */
 .settings-section { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; margin: 6px 0 -4px; }
 .settings-section:first-child { margin-top: 0; }
