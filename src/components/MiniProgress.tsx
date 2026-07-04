@@ -84,7 +84,8 @@ export function MiniProgress() {
           jobRef.current = jobId;
           try {
             const dest = await api.quickExtractDest(path, a.mode);
-            const out = await api.extractArchive({ jobId, path, dest, smart: false });
+            // "smart" → 智能解压（多个顶层文件自动套一层文件夹）；"here"/"folder" → 原样。
+            const out = await api.extractArchive({ jobId, path, dest, smart: a.mode === "smart" });
             if (settings.openAfterExtract) openPath(out).catch(() => {});
           } catch (e) {
             const msg = String(e);

@@ -264,7 +264,8 @@ export default function App() {
       try {
         const dest = await api.quickExtractDest(path, mode);
         if (!useMini) setJob({ jobId, title: "正在解压…", progress: null });
-        const out = await api.extractArchive({ jobId, path, dest, smart: false });
+        // "smart" → 智能解压（多个顶层文件自动套一层文件夹）；"here"/"folder" → 原样。
+        const out = await api.extractArchive({ jobId, path, dest, smart: mode === "smart" });
         toast("ok", `解压完成：${out.split(/[\\/]/).pop()}`);
         if (settings.openAfterExtract) openPath(out).catch(() => {});
         return true;
@@ -312,15 +313,11 @@ export default function App() {
               setCreateFor(a.paths);
             }
           } else if (a.kind === "create") {
-            if (a.format === "ask") setCreateFor(a.paths);
-            else quickCreates.push(a);
+            // ask（详细设置）已由 ask 小窗处理，不会进到这里；其余为快捷压缩。
+            quickCreates.push(a);
           } else if (a.kind === "extract") {
-            // "ask" → 打开归档，用应用内解压对话框自选位置；其它 → 逐个快捷解压。
-            if (a.mode === "ask") {
-              if (a.paths[0]) openArchive(a.paths[0]);
-            } else {
-              for (const p of a.paths) quickExtracts.push({ mode: a.mode, path: p });
-            }
+            // ask（解压到…）已由 ask 小窗处理，不会进到这里；其余逐个快捷解压。
+            for (const p of a.paths) quickExtracts.push({ mode: a.mode, path: p });
           }
         }
         if (quickCreates.length > 0 || quickExtracts.length > 0) {
