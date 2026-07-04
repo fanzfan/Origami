@@ -23,13 +23,31 @@ export function AskDialog() {
 
   // 窗口贴合卡片：按对话框类型给确定尺寸（压缩表单较高、解压较矮），再乘界面缩放 s。
   // 卡片铺满窗口、footer 固定可见；标题栏交通灯由卡片 header 顶部内边距让位（见 styles.css）。
+  // 后端 spawn_ask_window 已按队首类型（scale=1）预设窗口尺寸，故默认缩放下这里应是 no-op：
+  // 仅当实际尺寸与目标不符（非默认缩放，或队列切到另一类对话框）才 setSize+center，避免弹出闪烁。
   const currentKind = queue[idx]?.kind;
   useLayoutEffect(() => {
     if (!currentKind) return;
     const s = loadSettings().scale;
     const [w, h] = currentKind === "extract" ? [500, 268] : [500, 500];
+    const tw = Math.round(w * s);
+    const th = Math.round(h * s);
     const win = getCurrentWindow();
-    win.setSize(new LogicalSize(Math.round(w * s), Math.round(h * s))).then(() => win.center());
+    (async () => {
+      try {
+        const factor = await win.scaleFactor();
+        const cur = await win.innerSize(); // 物理像素，换算回逻辑像素与目标比较
+        const cw = Math.round(cur.width / factor);
+        const ch = Math.round(cur.height / factor);
+        if (Math.abs(cw - tw) <= 1 && Math.abs(ch - th) <= 1) return; // 已是目标尺寸，跳过
+        await win.setSize(new LogicalSize(tw, th));
+        await win.center();
+      } catch {
+        // 兜底：拿不到当前尺寸时直接精调一次。
+        await win.setSize(new LogicalSize(tw, th));
+        await win.center();
+      }
+    })();
   }, [currentKind]);
 
   // 进度事件 → 更新进度条。
