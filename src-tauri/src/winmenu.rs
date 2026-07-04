@@ -3,7 +3,7 @@
 //! 写 HKCU\Software\Classes 下的 shell 动词，直接把各动作平铺到右键菜单里
 //! （不再套「用 Origami 压缩 ▸」级联子菜单，少一层）：
 //!   压缩 → 文件(`*`)/文件夹(`Directory`)/文件夹背景；命令 `Origami.exe --compress=zip "%1"`
-//!   解压 → 仅挂到各归档扩展名（SystemFileAssociations\.<ext>）；`--extract=here "%1"`
+//!   解压 → 仅挂到各归档扩展名（SystemFileAssociations\.<ext>）；`--extract=smart "%1"`
 //! 单实例插件会把每次调用转发给已运行的主实例（见 cli.rs）。
 //!
 //! 仅写 HKCU，不需要管理员权限。Windows 11 上经典菜单出现在
@@ -23,6 +23,15 @@ const ARCHIVE_EXTS: &[&str] = &[
 ];
 /// 旧版本写入的级联父键名，卸载/重装时一并清除以便迁移。
 const LEGACY_KEYS: &[&str] = &["Origami", "Origami.Extract"];
+/// 旧版平铺解压项键名，重装时清理避免残留。含：最初的「解压到当前文件夹」，
+/// 以及解压项旧编号（1/2/3，现改为 4/5/6 以让压缩组整体排在解压组之前）。
+const RETIRED_EXTRACT_KEYS: &[&str] = &[
+    "Origami1ExtractHere",
+    "Origami1ExtractSmart",
+    "Origami2ExtractFolder",
+    "Origami3ExtractAsk",
+    "Origami5ExtractFolder",
+];
 
 struct Verb {
     /// 注册表子键名（同源动作按名排序，故加数字前缀）。
@@ -39,11 +48,11 @@ const COMPRESS_VERBS: &[Verb] = &[
     Verb { key: "Origami3Ask", title: "Origami 压缩（详细设置…）", arg: "--compress=ask" },
 ];
 
-/// 解压动作，平铺到压缩包的菜单顶层。
+/// 解压动作，平铺到压缩包的菜单顶层。键名编号紧接压缩组（4/6），
+/// 使经典菜单按键名字母序排序时，压缩三项整体排在解压项之前。
 const EXTRACT_VERBS: &[Verb] = &[
-    Verb { key: "Origami1ExtractHere", title: "Origami 解压到当前文件夹", arg: "--extract=here" },
-    Verb { key: "Origami2ExtractFolder", title: "Origami 解压到单独文件夹", arg: "--extract=folder" },
-    Verb { key: "Origami3ExtractAsk", title: "Origami 解压到…", arg: "--extract=ask" },
+    Verb { key: "Origami4ExtractSmart", title: "Origami 智能解压", arg: "--extract=smart" },
+    Verb { key: "Origami6ExtractAsk", title: "Origami 解压到…", arg: "--extract=ask" },
 ];
 
 fn exe() -> Result<String> {
@@ -123,6 +132,9 @@ fn remove_all(hkcu: &RegKey) {
         let base = extract_shell_base(ext);
         for v in EXTRACT_VERBS {
             let _ = hkcu.delete_subkey_all(format!("{base}\\{}", v.key));
+        }
+        for retired in RETIRED_EXTRACT_KEYS {
+            let _ = hkcu.delete_subkey_all(format!("{base}\\{retired}"));
         }
         for legacy in LEGACY_KEYS {
             let _ = hkcu.delete_subkey_all(format!("{base}\\{legacy}"));

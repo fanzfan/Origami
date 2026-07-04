@@ -187,12 +187,29 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 /// 创建「ask」小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
 /// 只渲染对应对话框（就是应用内那个子窗口卡片），完成即关闭，不打开完整主窗。
-/// 不透明、无毛玻璃；内嵌标题栏让交通灯浮于卡片背景之上。前端挂载后按卡片尺寸精调窗口大小。
+/// 不透明、无毛玻璃；内嵌标题栏让交通灯浮于卡片背景之上。
+///
+/// 初始尺寸按队首交互动作的类型预设，力求与前端 scale=1 时的最终尺寸完全一致：
+/// 这样默认缩放下前端无需再 setSize/center，避免「弹出后再缩放+重居中」的一次闪烁
+/// （非默认缩放或队列切换到另一类对话框时，前端仍会精调，见 AskDialog）。
 fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
     if app.get_webview_window("ask").is_some() {
         return Ok(());
     }
+    // 队首是「解压到…」→ 较矮；否则「压缩详细设置」→ 较高。须与 AskDialog 的尺寸表对齐。
+    let (w, h) = {
+        let q = app.state::<Arc<PendingAsk>>();
+        let first_is_extract = matches!(
+            q.0.lock().unwrap().first(),
+            Some(PendingAction::Extract { .. })
+        );
+        if first_is_extract {
+            (500.0, 268.0)
+        } else {
+            (500.0, 500.0)
+        }
+    };
     #[allow(unused_mut)]
     let mut b = tauri::WebviewWindowBuilder::new(
         app,
@@ -200,8 +217,7 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("index.html?ask=1".into()),
     )
     .title("Origami")
-    // 初始宽度 >480 卡片宽 + 边距，保证首帧卡片就是 480（不被 90vw 压窄），实测尺寸稳定。
-    .inner_size(560.0, 440.0)
+    .inner_size(w, h)
     .min_inner_size(360.0, 220.0)
     .resizable(true)
     .center();
