@@ -126,6 +126,8 @@ export const api = {
     invoke<string>("default_create_dest", { sources, ext }),
 
   takePendingActions: () => invoke<PendingAction[]>("take_pending_actions"),
+  takeAskActions: () => invoke<PendingAction[]>("take_ask_actions"),
+  finishAskWindow: () => invoke<void>("finish_ask_window"),
   frontendReady: () => invoke<void>("frontend_ready"),
   beginQuickJob: () => invoke<boolean>("begin_quick_job"),
   endQuickJob: (ok: boolean) => invoke<void>("end_quick_job", { ok }),

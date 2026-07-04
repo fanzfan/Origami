@@ -47,12 +47,18 @@ impl Jobs {
 pub enum PendingAction {
     Open { paths: Vec<String> },
     Create { format: String, paths: Vec<String> },
-    /// 右键快捷解压。mode: "here"（解压到当前文件夹）/"folder"（解压到同名子文件夹）/"ask"（打开归档自行选择）。
+    /// 右键快捷解压。mode: "smart"（智能解压到当前文件夹）/"here"（原地解压）/
+    /// "folder"（解压到同名子文件夹）/"ask"（弹小窗自选位置）。
     Extract { mode: String, paths: Vec<String> },
 }
 
 #[derive(Default)]
 pub struct Pending(Mutex<Vec<PendingAction>>);
+
+/// 需要交互的「ask」动作（压缩详细设置 / 解压到…）单独入队，由 ask 小窗驱动，
+/// 与主窗 / 迷你窗的 Pending 队列分开，避免抢同一批动作。
+#[derive(Default)]
+pub struct PendingAsk(Mutex<Vec<PendingAction>>);
 
 /// 通过 Finder 右键快捷压缩启动时置位：此时不显示主窗口，只弹迷你进度窗。
 #[derive(Default)]
@@ -99,36 +105,61 @@ fn parse_deep_link(url: &tauri::Url) -> Option<PendingAction> {
 }
 
 /// 把一批动作投递给前端：决定是否静默快捷压缩、必要时显示主窗，入队并通知。
+/// 判断动作是否需要交互（压缩「详细设置…」/ 解压「到…」）——这类交给 ask 小窗。
+fn is_ask(a: &PendingAction) -> bool {
+    matches!(a, PendingAction::Create { format, .. } if format == "ask")
+        || matches!(a, PendingAction::Extract { mode, .. } if mode == "ask")
+}
+
 /// macOS 由 RunEvent::Opened 调用；Windows/Linux 由启动参数与单实例转发调用。
 fn dispatch_actions(app: &tauri::AppHandle, actions: Vec<PendingAction>) {
     use tauri::{Emitter, Manager};
     if actions.is_empty() {
         return;
     }
-    // 全部是「无需交互」的快捷动作（压缩非 ask、解压非 ask）时，用迷你窗静默驱动。
-    let all_quick = actions.iter().all(|a| match a {
-        PendingAction::Create { format, .. } => format != "ask",
-        PendingAction::Extract { mode, .. } => mode != "ask",
-        PendingAction::Open { .. } => false,
-    });
+    // 需要交互的动作走独立的 ask 小窗，其余走原有主窗 / 迷你窗路径。
+    let (ask, rest): (Vec<PendingAction>, Vec<PendingAction>) =
+        actions.into_iter().partition(is_ask);
+
     let main = app.get_webview_window("main");
     let main_visible = main
         .as_ref()
         .map(|w| w.is_visible().unwrap_or(false))
         .unwrap_or(false);
-    // 先入队，确保驱动方（迷你窗或主窗）取走时动作已就绪。
-    app.state::<Arc<Pending>>().0.lock().unwrap().extend(actions);
-    if all_quick && !main_visible {
-        app.state::<Arc<QuickLaunch>>()
-            .0
-            .store(true, Ordering::Relaxed);
-        // 由「可见」的迷你窗驱动整条快捷压缩流程：迷你窗的 WebView2 必然初始化并跑 JS，
-        // 而隐藏的主窗在部分平台（Windows WebView2）可能延迟创建 webview、不跑 JS，
-        // 因此不能依赖隐藏主窗发起任务。见 MiniProgress.tsx。
-        let _ = spawn_mini_window(app);
-    } else if let Some(w) = main {
-        let _ = w.show();
-        let _ = w.set_focus();
+
+    // 「详细设置 / 解压到…」→ 只弹小窗渲染对应对话框，不惊动主窗。
+    if !ask.is_empty() {
+        app.state::<Arc<PendingAsk>>().0.lock().unwrap().extend(ask);
+        if !main_visible {
+            // 冷启动：置位以让 frontend_ready 不显示主窗，改由 ask 小窗驱动。
+            app.state::<Arc<QuickLaunch>>()
+                .0
+                .store(true, Ordering::Relaxed);
+        }
+        let _ = spawn_ask_window(app);
+    }
+
+    // 无需交互的快捷动作（压缩非 ask、解压非 ask）+ 打开。
+    if !rest.is_empty() {
+        let all_quick = rest.iter().all(|a| match a {
+            PendingAction::Create { format, .. } => format != "ask",
+            PendingAction::Extract { mode, .. } => mode != "ask",
+            PendingAction::Open { .. } => false,
+        });
+        // 先入队，确保驱动方（迷你窗或主窗）取走时动作已就绪。
+        app.state::<Arc<Pending>>().0.lock().unwrap().extend(rest);
+        if all_quick && !main_visible {
+            app.state::<Arc<QuickLaunch>>()
+                .0
+                .store(true, Ordering::Relaxed);
+            // 由「可见」的迷你窗驱动整条快捷压缩流程：迷你窗的 WebView2 必然初始化并跑 JS，
+            // 而隐藏的主窗在部分平台（Windows WebView2）可能延迟创建 webview、不跑 JS，
+            // 因此不能依赖隐藏主窗发起任务。见 MiniProgress.tsx。
+            let _ = spawn_mini_window(app);
+        } else if let Some(w) = &main {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
     }
     let _ = app.emit("deep-link-available", ());
 }
@@ -152,6 +183,39 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     .center()
     .build();
     r.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 创建「ask」小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
+/// 只渲染对应对话框（就是应用内那个子窗口卡片），完成即关闭，不打开完整主窗。
+/// 不透明、无毛玻璃；内嵌标题栏让交通灯浮于卡片背景之上。前端挂载后按卡片尺寸精调窗口大小。
+fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if app.get_webview_window("ask").is_some() {
+        return Ok(());
+    }
+    #[allow(unused_mut)]
+    let mut b = tauri::WebviewWindowBuilder::new(
+        app,
+        "ask",
+        tauri::WebviewUrl::App("index.html?ask=1".into()),
+    )
+    .title("Origami")
+    // 初始宽度 >480 卡片宽 + 边距，保证首帧卡片就是 480（不被 90vw 压窄），实测尺寸稳定。
+    .inner_size(560.0, 440.0)
+    .min_inner_size(360.0, 220.0)
+    .resizable(true)
+    .center();
+    #[cfg(target_os = "macos")]
+    {
+        b = b
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        b = b.decorations(false);
+    }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -769,6 +833,38 @@ fn end_quick_job(
     }
 }
 
+/// ask 小窗取走待处理的交互动作（压缩详细设置 / 解压到…）。
+#[tauri::command]
+fn take_ask_actions(ask: tauri::State<'_, Arc<PendingAsk>>) -> Vec<PendingAction> {
+    std::mem::take(&mut *ask.0.lock().unwrap())
+}
+
+/// ask 小窗处理完毕：关闭小窗。主窗未显示且两个队列都空时退出应用
+/// （与快捷压缩一致：右键单动作用完即退）。
+#[tauri::command]
+fn finish_ask_window(
+    app: tauri::AppHandle,
+    pending: tauri::State<'_, Arc<Pending>>,
+    ask: tauri::State<'_, Arc<PendingAsk>>,
+) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("ask") {
+        let _ = w.close();
+    }
+    let main_visible = app
+        .get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    if main_visible {
+        return;
+    }
+    let has_pending =
+        !pending.0.lock().unwrap().is_empty() || !ask.0.lock().unwrap().is_empty();
+    if !has_pending {
+        app.exit(0);
+    }
+}
+
 #[tauri::command]
 fn default_extract_dir(path: String) -> String {
     PathBuf::from(&path)
@@ -779,8 +875,8 @@ fn default_extract_dir(path: String) -> String {
 
 /// 快捷解压的目标目录：
 /// - "folder"：源同目录下、以归档去扩展名后的名字建子文件夹（解压到「同名文件夹」）。
-/// - 其它（"here"）：源所在目录（原地解压）。
-/// 解压时统一 smart=false，行为确定，与主流软件的「解压到当前/单独文件夹」一致。
+/// - 其它（"smart" / "here"）：源所在目录。"smart" 再配合 smart=true 由前端决定
+///   是否自动套一层文件夹（避免散落）；"here" 则原地解压。
 #[tauri::command]
 fn quick_extract_dest(path: String, mode: String) -> String {
     let p = PathBuf::from(&path);
@@ -933,6 +1029,7 @@ pub fn run() {
         })
         .manage(Arc::new(Jobs::default()))
         .manage(Arc::new(Pending::default()))
+        .manage(Arc::new(PendingAsk::default()))
         .manage(Arc::new(QuickLaunch::default()))
         .invoke_handler(tauri::generate_handler![
             list_archive,
@@ -958,6 +1055,8 @@ pub fn run() {
             default_create_dest,
             list_dir,
             take_pending_actions,
+            take_ask_actions,
+            finish_ask_window,
             frontend_ready,
             begin_quick_job,
             end_quick_job,

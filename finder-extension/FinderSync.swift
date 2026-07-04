@@ -38,9 +38,9 @@ class OrigamiFinderSyncExt: FIFinderSync {
         sub.addItem(item("压缩为 ZIP", #selector(zipAction(_:))))
         sub.addItem(item("压缩（详细设置…）", #selector(createAskAction(_:))))
 
-        // 解压：仅当选中项全部是归档时出现（「当前文件夹」与「解压到…」两项）。
+        // 解压：仅当选中项全部是归档时出现（「智能解压」与「解压到…」两项）。
         if urls.allSatisfy(Self.isArchive) {
-            sub.addItem(item("解压到当前文件夹", #selector(extractHereAction(_:))))
+            sub.addItem(item("智能解压", #selector(extractSmartAction(_:))))
             sub.addItem(item("解压到…", #selector(extractAskAction(_:))))
         }
 
@@ -65,7 +65,7 @@ class OrigamiFinderSyncExt: FIFinderSync {
 
     @objc func zipAction(_ sender: AnyObject?) { open("create", "format", "zip") }
     @objc func createAskAction(_ sender: AnyObject?) { open("create", "format", "ask") }
-    @objc func extractHereAction(_ sender: AnyObject?) { open("extract", "mode", "here") }
+    @objc func extractSmartAction(_ sender: AnyObject?) { open("extract", "mode", "smart") }
     @objc func extractAskAction(_ sender: AnyObject?) { open("extract", "mode", "ask") }
 
     // MARK: - 辅助
