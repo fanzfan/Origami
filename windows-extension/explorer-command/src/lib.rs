@@ -3,7 +3,7 @@
 //! 实现 Windows 11「新版右键菜单」的顶层项 —— 各动作**直接平铺**在右键菜单里
 //! （不套「用 Origami 压缩 ▸」级联子菜单，少一层）：
 //!   Origami 压缩为 ZIP / 7Z / 详细设置        → Origami.exe --compress=<zip|7z|ask> "<路径>" …
-//!   Origami 解压到当前文件夹 / 单独文件夹 / …  → Origami.exe --extract=<here|folder|ask> "<路径>" …
+//!   Origami 智能解压 / 解压到…                  → Origami.exe --extract=<smart|ask> "<路径>" …
 //! 解压项仅在选中项全是压缩包时显示（GetState 动态返回 ECS_HIDDEN）。
 //! 主程序的单实例逻辑（src-tauri/src/cli.rs）会把它们汇入运行中的实例。
 //!
@@ -24,19 +24,18 @@ use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-// 六个顶层命令的 CLSID（须与 AppxManifest.xml 中一致）。
+// 五个顶层命令的 CLSID（须与 AppxManifest.xml 中一致）。
 const CLSID_ZIP: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e11);
 const CLSID_7Z: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e12);
 const CLSID_ASK: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e13);
-const CLSID_HERE: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e21);
-const CLSID_FOLDER: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e22);
+const CLSID_SMART: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e21);
 const CLSID_EXTRACT_ASK: GUID = GUID::from_u128(0x6b3d8a1c_4f2e_4c7a_9e1d_7a2b5c8d9e23);
 
 /// 一个顶层命令的定义。
 struct CmdDef {
     clsid: GUID,
     title: &'static str,
-    /// 完整命令行开关，如 "--compress=zip" / "--extract=here"。
+    /// 完整命令行开关，如 "--compress=zip" / "--extract=smart"。
     arg: &'static str,
     /// 仅当选中项全为压缩包时显示（解压类动作）。
     archive_only: bool,
@@ -46,8 +45,7 @@ const COMMANDS: &[CmdDef] = &[
     CmdDef { clsid: CLSID_ZIP, title: "Origami 压缩为 ZIP", arg: "--compress=zip", archive_only: false },
     CmdDef { clsid: CLSID_7Z, title: "Origami 压缩为 7Z", arg: "--compress=7z", archive_only: false },
     CmdDef { clsid: CLSID_ASK, title: "Origami 压缩（详细设置…）", arg: "--compress=ask", archive_only: false },
-    CmdDef { clsid: CLSID_HERE, title: "Origami 解压到当前文件夹", arg: "--extract=here", archive_only: true },
-    CmdDef { clsid: CLSID_FOLDER, title: "Origami 解压到单独文件夹", arg: "--extract=folder", archive_only: true },
+    CmdDef { clsid: CLSID_SMART, title: "Origami 智能解压", arg: "--extract=smart", archive_only: true },
     CmdDef { clsid: CLSID_EXTRACT_ASK, title: "Origami 解压到…", arg: "--extract=ask", archive_only: true },
 ];
 
@@ -103,7 +101,7 @@ unsafe fn selected_paths(items: Option<&IShellItemArray>) -> Vec<String> {
     out
 }
 
-/// 启动 Origami.exe，`flag_arg` 为完整开关（如 "--compress=zip" / "--extract=here"），
+/// 启动 Origami.exe，`flag_arg` 为完整开关（如 "--compress=zip" / "--extract=smart"），
 /// 后接选中的所有路径。
 unsafe fn launch(flag_arg: &str, items: Option<&IShellItemArray>) -> Result<()> {
     let Some(exe) = origami_exe() else {
