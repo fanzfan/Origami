@@ -74,11 +74,11 @@ export default function App() {
     saveSettings(settings);
   }, [settings]);
 
-  // 窗口材质（Mica / 毛玻璃）：仅主窗，开关变化时重新施加。
+  // 窗口材质（亚克力 / 云母 / 毛玻璃）：仅主窗，材质变化时重新施加。
   useEffect(() => {
     applyWindowEffects(settings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.effects]);
+  }, [settings.material]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

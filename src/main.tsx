@@ -18,7 +18,7 @@ applySettings(startupSettings);
 // 只有主窗要毛玻璃材质（data-effects=on 让 body 透明透出材质）。
 // 迷你窗、ask 小窗都不透明、无材质：ask 小窗就是应用内那个对话框卡片，纯色背景即可。
 if (!isMini && !isAsk) {
-  document.documentElement.setAttribute("data-effects", startupSettings.effects ? "on" : "off");
+  document.documentElement.setAttribute("data-effects", startupSettings.material !== "none" ? "on" : "off");
 }
 // ask 小窗：去掉模态的深色遮罩（standalone 窗口不需要压暗背景），卡片直接浮在应用背景色上。
 if (isAsk) {

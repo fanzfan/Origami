@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
 import type { JobState } from "../App";
-import { FONTS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
+import { FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
 function Modal(p: { title: string; wide?: boolean; children: React.ReactNode; footer?: React.ReactNode; onClose?: () => void }) {
   return (
@@ -256,6 +256,7 @@ export function SettingsDialog(p: {
   const s = p.settings;
   const pct = Math.round(s.scale * 100);
   const setScale = (v: number) => p.onChange({ scale: clampScale(v) });
+  const isWin = navigator.userAgent.includes("Windows") || navigator.platform.startsWith("Win");
 
   return (
     <Modal
@@ -326,17 +327,31 @@ export function SettingsDialog(p: {
         </select>
       </div>
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={s.effects}
-          onChange={(e) => p.onChange({ effects: e.target.checked })}
-        />
-        <span className="grow">
-          窗口材质效果
-          <div className="hint">Windows 11 显示 Mica 云母材质，macOS 显示毛玻璃；旧系统不支持时自动保持不透明。</div>
-        </span>
-      </label>
+      {isWin ? (
+        <div className="field">
+          <label>窗口材质</label>
+          <select value={s.material} onChange={(e) => p.onChange({ material: e.target.value as Settings["material"] })}>
+            {MATERIALS.map(([key, name]) => (
+              <option key={key} value={key}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <div className="hint">Windows 11 可选亚克力 / 云母（Mica）/ 无；需系统「透明效果」开启，材质感来自桌面壁纸。旧系统不支持时自动保持不透明。</div>
+        </div>
+      ) : (
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={s.material !== "none"}
+            onChange={(e) => p.onChange({ material: e.target.checked ? "acrylic" : "none" })}
+          />
+          <span className="grow">
+            窗口材质效果
+            <div className="hint">macOS 显示毛玻璃；旧系统不支持时自动保持不透明。</div>
+          </span>
+        </label>
+      )}
 
       <div className="settings-section">压缩与解压</div>
 

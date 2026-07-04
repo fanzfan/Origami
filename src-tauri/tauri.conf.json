@@ -25,7 +25,7 @@
         "dragDropEnabled": true,
         "transparent": true,
         "windowEffects": {
-          "effects": ["mica", "underWindowBackground"],
+          "effects": ["acrylic", "underWindowBackground"],
           "state": "followsWindowActiveState"
         }
       }
