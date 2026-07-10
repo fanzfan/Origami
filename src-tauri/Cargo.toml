@@ -53,6 +53,8 @@ windows = { version = "0.58", features = [
     "Foundation",
     "Win32_Foundation",
     "Win32_System_WinRT",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Dwm",
 ] }
 
 [profile.release]

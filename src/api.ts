@@ -136,6 +136,10 @@ export const api = {
   shellMenuInstalled: () => invoke<boolean>("shell_menu_installed"),
   appPlatform: () => invoke<string>("app_platform"),
 
+  // 亚克力材质透明度（仅 Windows 生效）。enabled=false 时清除本 accent 亚克力。
+  setAcrylic: (enabled: boolean, r: number, g: number, b: number, alpha: number) =>
+    invoke<void>("set_acrylic", { enabled, r, g, b, alpha }),
+
   fileAssocSupported: () => invoke<boolean>("file_assoc_supported"),
   fileAssocList: () => invoke<AssocEntry[]>("file_assoc_list"),
   fileAssocSet: (exts: string[], associate: boolean) =>

@@ -13,6 +13,8 @@ pub mod sysauth;
 #[cfg(target_os = "windows")]
 pub mod winassoc;
 #[cfg(target_os = "windows")]
+pub mod winmat;
+#[cfg(target_os = "windows")]
 pub mod winmenu;
 
 use archive::create::CreateOptions;
@@ -665,6 +667,37 @@ fn app_platform() -> &'static str {
     std::env::consts::OS
 }
 
+/// 亚克力材质透明度调节（仅 Windows 有效）。
+///
+/// `enabled=true` 时用 `(r,g,b)` 作色调基色、`alpha`(0..=255) 作不透明度施加可调透明度的
+/// 亚克力；`enabled=false` 时清除本 accent 亚克力（切到云母/无材质前调用，避免残留）。
+/// 非 Windows 平台为安全空操作。
+#[tauri::command]
+fn set_acrylic(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    #[allow(unused_variables)] enabled: bool,
+    #[allow(unused_variables)] r: u8,
+    #[allow(unused_variables)] g: u8,
+    #[allow(unused_variables)] b: u8,
+    #[allow(unused_variables)] alpha: u8,
+) -> CmdResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::Manager;
+        let hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+            .ok_or_else(|| "找不到主窗口".to_string())?;
+        if enabled {
+            winmat::apply_acrylic(hwnd, r, g, b, alpha)?;
+        } else {
+            winmat::clear_acrylic(hwnd)?;
+        }
+    }
+    Ok(())
+}
+
 // ---------------- 文件关联管理 ----------------
 
 /// 可由本应用接管的压缩包扩展名（与 tauri.conf.json 的 fileAssociations 对齐）。
@@ -1080,6 +1113,7 @@ pub fn run() {
             uninstall_shell_menu,
             shell_menu_installed,
             app_platform,
+            set_acrylic,
             file_assoc_supported,
             file_assoc_list,
             file_assoc_set,

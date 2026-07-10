@@ -74,11 +74,12 @@ export default function App() {
     saveSettings(settings);
   }, [settings]);
 
-  // 窗口材质（亚克力 / 云母 / 毛玻璃）：仅主窗，材质变化时重新施加。
+  // 窗口材质（亚克力 / 云母 / 毛玻璃）：仅主窗。材质、亚克力透明度，或影响玻璃
+  // 色调的主题/深浅模式变化时都重新施加。
   useEffect(() => {
     applyWindowEffects(settings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.material]);
+  }, [settings.material, settings.acrylicOpacity, settings.theme, settings.mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

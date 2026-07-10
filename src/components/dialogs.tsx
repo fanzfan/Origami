@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
 import type { JobState } from "../App";
-import { FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
+import { ACRYLIC_OPACITY_MAX, ACRYLIC_OPACITY_MIN, FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
 function Modal(p: { title: string; wide?: boolean; children: React.ReactNode; footer?: React.ReactNode; onClose?: () => void }) {
   return (
@@ -338,6 +338,20 @@ export function SettingsDialog(p: {
             ))}
           </select>
           <div className="hint">Windows 11 可选亚克力 / 云母（Mica）/ 无；需系统「透明效果」开启，材质感来自桌面壁纸。旧系统不支持时自动保持不透明。</div>
+          {s.material === "acrylic" && (
+            <div style={{ marginTop: 10 }}>
+              <label>亚克力透明度：{100 - s.acrylicOpacity}%</label>
+              <input
+                type="range"
+                min={100 - ACRYLIC_OPACITY_MAX}
+                max={100 - ACRYLIC_OPACITY_MIN}
+                value={100 - s.acrylicOpacity}
+                onChange={(e) => p.onChange({ acrylicOpacity: 100 - Number(e.target.value) })}
+                style={{ width: "100%" }}
+              />
+              <div className="hint">仅亚克力可调：向右更透（桌面/模糊透出更多），向左更实。</div>
+            </div>
+          )}
         </div>
       ) : (
         <label className="toggle-row">
