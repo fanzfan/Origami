@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveInfo, Entry, fmtDate, fmtSize, fsBreadcrumbs, splitParent } from "../api";
-import { FileIcon } from "../icons";
+import { FileIcon, UiIcon } from "../icons";
 import { EntryProperties } from "./dialogs";
 import { PathBar } from "./PathBar";
 
@@ -146,7 +146,7 @@ export function Browser(p: Props) {
         list.push({ label: c.label, kind: "fs", target: c.path });
       }
     }
-    list.push({ label: `🗜 ${archiveParent.name}`, kind: "arc", target: "" });
+    list.push({ label: archiveParent.name, kind: "arc", target: "" });
     let acc = "";
     for (const part of cwd ? cwd.split("/") : []) {
       acc = acc ? `${acc}/${part}` : part;
@@ -323,18 +323,22 @@ export function Browser(p: Props) {
     <div className="browser">
       <div className="toolbar">
         <button className="btn primary" onClick={() => p.onExtract([])}>
-          ⬇ 解压全部
+          <UiIcon name="extract" />
+          解压全部
         </button>
         <button className="btn" disabled={selCount === 0} onClick={() => p.onExtract([...selected])}>
+          <UiIcon name="extract" />
           解压选中 {selCount > 0 ? `(${selCount})` : ""}
         </button>
         <button className="btn" onClick={p.onTest}>
-          ✓ 校验
+          <UiIcon name="verify" />
+          校验
         </button>
         {editable && (
           <>
             <button className="btn" onClick={() => p.onAdd(cwd)} title="添加文件到当前目录">
-              ＋ 添加
+              <UiIcon name="add" />
+              添加
             </button>
             <button
               className="btn danger"
@@ -345,7 +349,8 @@ export function Browser(p: Props) {
               }}
               title="从压缩包中删除选中条目（Delete）"
             >
-              − 删除 {selCount > 0 ? `(${selCount})` : ""}
+              <UiIcon name="delete" />
+              删除 {selCount > 0 ? `(${selCount})` : ""}
             </button>
           </>
         )}
@@ -405,7 +410,7 @@ export function Browser(p: Props) {
             {(cwd || p.onNavigateFs) && !search && (
               <tr onDoubleClick={goUp}>
                 <td className="name">
-                  <span className="icon">↩️</span>
+                  <span className="icon"><UiIcon name="up" size={18} /></span>
                   <span>{cwd ? ".." : ".. (返回上级文件夹)"}</span>
                 </td>
                 <td className="num" />
@@ -427,7 +432,7 @@ export function Browser(p: Props) {
                   <td className="name">
                     <FileIcon name={r.name} isDir={r.isDir} />
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-                    {r.encrypted && <span className="lock">🔒</span>}
+                    {r.encrypted && <span className="lock" title="已加密"><UiIcon name="lock" size={13} /></span>}
                   </td>
                   <td className="num">{r.isDir && r.size === 0 ? "—" : fmtSize(r.size)}</td>
                   <td className="num">{r.compressed > 0 ? fmtSize(r.compressed) : "—"}</td>
@@ -463,8 +468,8 @@ export function Browser(p: Props) {
           </span>
         )}
         <span className="spacer" />
-        {p.info.hasEncrypted && <span>🔒 含加密内容</span>}
-        {p.info.comment && <span title={p.info.comment}>💬 含注释</span>}
+        {p.info.hasEncrypted && <span><UiIcon name="lock" size={13} /> 含加密内容</span>}
+        {p.info.comment && <span title={p.info.comment}><UiIcon name="comment" size={13} /> 含注释</span>}
         <span>{p.info.format}</span>
       </div>
 

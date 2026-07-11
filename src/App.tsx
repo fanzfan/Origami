@@ -7,6 +7,7 @@ import { api, ARCHIVE_EXTS, ArchiveInfo, DirListing, isArchive, newJobId, Progre
 import { Welcome } from "./components/Welcome";
 import { Browser } from "./components/Browser";
 import { FileExplorer } from "./components/FileExplorer";
+import { UiIcon } from "./icons";
 import {
   CreateDialog,
   ExtractDialog,
@@ -554,33 +555,36 @@ export default function App() {
   return (
     <div className="app">
       <div className={`titlebar${isWin ? " win" : ""}`} data-tauri-drag-region>
+        <span className="brand-logo titlebar-logo" data-tauri-drag-region aria-hidden="true" />
         <span className="title" data-tauri-drag-region>{title}</span>
         <span style={{ flex: 1 }} data-tauri-drag-region />
         {archivePath && (
           <button className="btn ghost sm" onClick={closeArchive}>
-            ✕ 关闭归档
+            <UiIcon name="close" />
+            关闭归档
           </button>
         )}
         {!archivePath && fsListing && (
           <button className="btn ghost sm" onClick={() => setFsListing(null)} title="返回主页">
-            🏠 主页
+            <UiIcon name="home" />
+            主页
           </button>
         )}
-        <button className="btn ghost sm" onClick={() => setShowFinder(true)} title="右键菜单集成">
-          🧩
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowFinder(true)} title="右键菜单集成" aria-label="右键菜单集成">
+          <UiIcon name="integration" />
         </button>
-        <button className="btn ghost sm" onClick={() => setShowAssoc(true)} title="文件关联">
-          🔗
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowAssoc(true)} title="文件关联" aria-label="文件关联">
+          <UiIcon name="link" />
         </button>
-        <button className="btn ghost sm" onClick={() => setShowPwMgr(true)} title="密码管理器">
-          🔑
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowPwMgr(true)} title="密码管理器" aria-label="密码管理器">
+          <UiIcon name="key" />
         </button>
-        <button className="btn ghost sm" onClick={() => setShowSettings(true)} title={isMac ? "设置 (⌘,)" : "设置 (Ctrl+,)"}>
-          <span style={{ fontSize: "1.2em", lineHeight: 1 }}>⚙️</span>
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowSettings(true)} title={isMac ? "设置 (⌘,)" : "设置 (Ctrl+,)"} aria-label="设置">
+          <UiIcon name="settings" />
         </button>
         {isWin && (
-          <button className="btn ghost sm win-close" onClick={() => getCurrentWindow().close()} title="关闭">
-            ✕
+          <button className="btn ghost sm titlebar-tool win-close" onClick={() => getCurrentWindow().close()} title="关闭" aria-label="关闭窗口">
+            <UiIcon name="close" />
           </button>
         )}
       </div>

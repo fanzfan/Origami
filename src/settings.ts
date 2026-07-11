@@ -44,9 +44,9 @@ export const FONTS: [string, string, string][] = [
 ];
 
 // [key, 显示名, 代表色(用于设置里的色块预览)]。实际配色在 styles.css 的
-// :root[data-theme=...] 块中按浅色/深色分别定义。"default" 用内置橙色。
+// :root[data-theme=...] 块中按浅色/深色分别定义。"default" 使用 Origami 品牌蓝紫。
 export const THEMES: [string, string, string][] = [
-  ["default", "折纸橙", "#f97316"],
+  ["default", "折纸蓝", "#5b5fef"],
   ["ocean", "海洋蓝", "#0ea5e9"],
   ["forest", "森林绿", "#16a34a"],
   ["grape", "葡萄紫", "#8b5cf6"],

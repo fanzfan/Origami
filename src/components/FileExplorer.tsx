@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DirListing, FsEntry, fmtDate, fmtSize, fsBreadcrumbs, isArchive } from "../api";
-import { FileIcon } from "../icons";
+import { FileIcon, UiIcon } from "../icons";
 import { PathBar } from "./PathBar";
 
 // 应用内文件管理器（文件系统视图）。浏览任意真实路径；双击文件夹进入、双击压缩包
@@ -119,7 +119,8 @@ export function FileExplorer(p: Props) {
           onClick={() => p.listing.parent !== null && p.onNavigate(p.listing.parent)}
           title="上级目录（Backspace）"
         >
-          ↑ 上级
+          <UiIcon name="up" />
+          上级
         </button>
         <button
           className="btn primary"
@@ -127,7 +128,8 @@ export function FileExplorer(p: Props) {
           onClick={() => p.onCompress([...selected])}
           title="把选中项压缩为压缩包"
         >
-          🗜 压缩 {selCount > 0 ? `(${selCount})` : ""}
+          <UiIcon name="folder-archive" />
+          压缩 {selCount > 0 ? `(${selCount})` : ""}
         </button>
         <span className="spacer" />
       </div>
@@ -155,7 +157,7 @@ export function FileExplorer(p: Props) {
             {p.listing.parent !== null && (
               <tr onDoubleClick={() => p.onNavigate(p.listing.parent!)}>
                 <td className="name">
-                  <span className="icon">↩️</span>
+                  <span className="icon"><UiIcon name="up" size={18} /></span>
                   <span>..</span>
                 </td>
                 <td className="num" />
