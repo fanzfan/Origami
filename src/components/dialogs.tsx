@@ -1,13 +1,95 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
+import { UiIcon, type UiIconName } from "../icons";
 import type { JobState } from "../App";
 import { ACRYLIC_OPACITY_MAX, ACRYLIC_OPACITY_MIN, FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
 
-function Modal(p: { title: string; wide?: boolean; children: React.ReactNode; footer?: React.ReactNode; onClose?: () => void }) {
+function Modal(p: {
+  title: string;
+  eyebrow?: string;
+  description?: string;
+  icon?: UiIconName;
+  className?: string;
+  wide?: boolean;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  onClose?: () => void;
+}) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!p.onClose) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing || e.defaultPrevented || e.keyCode === 229) return;
+      if (e.key === "Escape") p.onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [p.onClose]);
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = requestAnimationFrame(() => {
+      const target = dialogRef.current?.querySelector<HTMLElement>(
+        ".body input:not([disabled]), .body select:not([disabled]), .body button:not([disabled]), footer button:not([disabled]), .modal-close",
+      );
+      target?.focus();
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, []);
+
+  const trapFocus = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ) ?? [],
+    ).filter((el) => el.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && p.onClose?.()}>
-      <div className={`modal ${p.wide ? "wide" : ""}`}>
-        <header>{p.title}</header>
+      <div
+        ref={dialogRef}
+        className={["modal", p.wide ? "wide" : "", p.className ?? ""].filter(Boolean).join(" ")}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onKeyDown={trapFocus}
+      >
+        <header className="modal-header" data-tauri-drag-region>
+          <div className="modal-heading" data-tauri-drag-region>
+            {p.icon && (
+              <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
+                <UiIcon name={p.icon} size={20} />
+              </span>
+            )}
+            <div className="modal-heading-copy" data-tauri-drag-region>
+              {p.eyebrow && <div className="modal-eyebrow">{p.eyebrow}</div>}
+              <h2 id={titleId}>{p.title}</h2>
+              {p.description && <p>{p.description}</p>}
+            </div>
+          </div>
+          {p.onClose && (
+            <button className="btn ghost modal-close" onClick={p.onClose} aria-label="关闭" title="关闭">
+              <UiIcon name="close" size={17} />
+            </button>
+          )}
+        </header>
         <div className="body">{p.children}</div>
         {p.footer && <footer>{p.footer}</footer>}
       </div>
@@ -27,6 +109,7 @@ export function ExtractDialog(p: {
 }) {
   const [dest, setDest] = useState("");
   const [smart, setSmart] = useState(true);
+  const archiveName = p.archivePath.split(/[\\/]/).pop() || p.archivePath;
 
   useEffect(() => {
     p.defaultDir().then(setDest);
@@ -36,19 +119,32 @@ export function ExtractDialog(p: {
   return (
     <Modal
       title={p.entryCount > 0 ? `解压选中的 ${p.entryCount} 项` : "解压全部"}
+      eyebrow="解压归档"
+      description="选择目标位置，Origami 会保持目录结构清晰。"
+      icon="extract"
+      className="task-dialog extract-dialog"
       onClose={p.onCancel}
       footer={
         <>
           <button className="btn" onClick={p.onCancel}>取消</button>
           <button className="btn primary" disabled={!dest} onClick={() => p.onConfirm(dest, smart)}>
+            <UiIcon name="extract" size={15} />
             开始解压
           </button>
         </>
       }
     >
+      <div className="task-source" title={p.archivePath}>
+        <span className="task-source-icon"><UiIcon name="file-archive" size={19} /></span>
+        <span className="task-source-main">
+          <span className="task-source-label">来源归档</span>
+          <strong>{archiveName}</strong>
+          <span className="task-source-path">{p.archivePath}</span>
+        </span>
+      </div>
       <div className="field">
         <label>解压到</label>
-        <div className="row">
+        <div className="row path-picker">
           <input type="text" value={dest} onChange={(e) => setDest(e.target.value)} />
           <button
             className="btn"
@@ -57,14 +153,16 @@ export function ExtractDialog(p: {
               if (d) setDest(d);
             }}
           >
+            <UiIcon name="folder-open" size={15} />
             浏览…
           </button>
         </div>
       </div>
-      <label className="row" style={{ gap: 8 }}>
-        <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} style={{ width: "auto" }} />
-        <span>
-          智能解压 <span className="hint">（多个顶层文件时自动创建文件夹，避免散落）</span>
+      <label className="smart-option">
+        <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} />
+        <span className="smart-option-copy">
+          <strong>智能解压</strong>
+          <span>多个顶层文件时自动创建文件夹，避免文件散落。</span>
         </span>
       </label>
     </Modal>
@@ -125,10 +223,16 @@ export function CreateDialog(p: {
   const [dest, setDest] = useState("");
 
   const fmt = FORMATS.find((f) => f.v === format)!;
+  const sourceName = p.sources[0]?.split(/[\\/]/).pop() || p.sources[0] || "未命名项目";
+  const levelLabel = level === 0 ? "仅存储" : level <= 3 ? "更快" : level <= 6 ? "均衡" : level < 9 ? "更小" : "最高";
 
   return (
     <Modal
       title={`压缩 ${p.sources.length} 项`}
+      eyebrow="创建归档"
+      description="设置输出位置、格式与压缩参数。"
+      icon="archive"
+      className="task-dialog create-dialog"
       onClose={p.onCancel}
       footer={
         <>
@@ -147,20 +251,28 @@ export function CreateDialog(p: {
               })
             }
           >
+            <UiIcon name="archive" size={15} />
             开始压缩
           </button>
         </>
       }
     >
-      <div className="hint" style={{ maxHeight: 60, overflow: "auto" }}>
-        {p.sources.map((s) => (
-          <div key={s}>{s}</div>
-        ))}
+      <div className="task-source" title={p.sources.join("\n")}>
+        <span className="task-source-icon">
+          <UiIcon name={p.sources.length > 1 ? "folder-archive" : "file-archive"} size={19} />
+        </span>
+        <span className="task-source-main">
+          <span className="task-source-label">待压缩{p.sources.length > 1 ? ` · ${p.sources.length} 项` : ""}</span>
+          <strong>{sourceName}</strong>
+          <span className="task-source-path">
+            {p.sources[0]}{p.sources.length > 1 ? ` · 另有 ${p.sources.length - 1} 项` : ""}
+          </span>
+        </span>
       </div>
 
       <div className="field">
         <label>保存为</label>
-        <div className="row">
+        <div className="row path-picker">
           <input type="text" value={dest} onChange={(e) => setDest(e.target.value)} placeholder="选择保存位置…" />
           <button
             className="btn"
@@ -169,12 +281,13 @@ export function CreateDialog(p: {
               if (d) setDest(d);
             }}
           >
+            <UiIcon name="folder-open" size={15} />
             浏览…
           </button>
         </div>
       </div>
 
-      <div className="row">
+      <div className="row form-grid">
         <div className="field">
           <label>格式</label>
           <select
@@ -218,11 +331,22 @@ export function CreateDialog(p: {
         </div>
       )}
 
-      <div className="field">
-        <label>
-          压缩等级：{level === 0 ? "仅存储" : level} {level === 9 ? "（最高）" : ""}
-        </label>
-        <input type="range" min={0} max={9} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
+      <div className="field level-field">
+        <div className="field-label-row">
+          <label>压缩等级</label>
+          <span className="value-pill">{level === 0 ? "0" : level} · {levelLabel}</span>
+        </div>
+        <input
+          className="level-range"
+          type="range"
+          min={0}
+          max={9}
+          value={level}
+          aria-label="压缩等级"
+          style={{ "--range-progress": `${(level / 9) * 100}%` } as CSSProperties}
+          onChange={(e) => setLevel(Number(e.target.value))}
+        />
+        <div className="range-labels"><span>更快</span><span>更小</span></div>
       </div>
 
       {fmt.enc && (
@@ -236,7 +360,7 @@ export function CreateDialog(p: {
           />
         </div>
       )}
-      {volume > 0 && <div className="hint">分卷输出为 .001 / .002 … 文件，解压时选择 .001 即可（需先合并或使用支持分卷的工具）。</div>}
+      {volume > 0 && <div className="task-note">分卷输出为 .001 / .002 … 文件；解压时请选择 .001。</div>}
     </Modal>
   );
 }
@@ -882,26 +1006,29 @@ export function ProgressModal(p: { job: JobState; onCancel: () => void }) {
   const prog = p.job.progress;
   const pct = prog && prog.total > 0 ? Math.min(100, (prog.current / prog.total) * 100) : null;
   return (
-    <div className="overlay">
-      <div className="modal">
-        <header>{p.job.title}</header>
-        <div className="body">
-          <div className={`progressbar ${pct === null ? "indeterminate" : ""}`}>
-            <div style={{ width: `${pct ?? 30}%` }} />
-          </div>
-          <div className="progress-file">
-            {prog
-              ? prog.total > 0
-                ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
-                : `${fmtSize(prog.current)} · ${prog.file}`
-              : "准备中…"}
-          </div>
-        </div>
-        <footer>
-          <button className="btn" onClick={p.onCancel}>取消</button>
-        </footer>
+    <Modal
+      title={p.job.title}
+      eyebrow="执行任务"
+      description="Origami 正在处理归档内容。"
+      icon={p.job.title.includes("解压") ? "extract" : "archive"}
+      className="task-dialog progress-dialog"
+      footer={<button className="btn" onClick={p.onCancel}>取消</button>}
+    >
+      <div className="progress-meta">
+        <span>{pct === null ? "正在准备" : "处理进度"}</span>
+        <strong>{pct === null ? "—" : `${pct.toFixed(0)}%`}</strong>
       </div>
-    </div>
+      <div className={`progressbar ${pct === null ? "indeterminate" : ""}`}>
+        <div style={{ width: `${pct ?? 30}%` }} />
+      </div>
+      <div className="progress-file">
+        {prog
+          ? prog.total > 0
+            ? `${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
+            : `${fmtSize(prog.current)} · ${prog.file}`
+          : "准备中…"}
+      </div>
+    </Modal>
   );
 }
 

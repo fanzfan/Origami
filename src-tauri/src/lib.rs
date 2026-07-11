@@ -179,7 +179,7 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("index.html?mini=1".into()),
     )
     .title("Origami")
-    .inner_size(420.0, 148.0)
+    .inner_size(480.0, 190.0)
     .resizable(false)
     .always_on_top(true)
     .center()
@@ -207,9 +207,9 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
             Some(PendingAction::Extract { .. })
         );
         if first_is_extract {
-            (500.0, 268.0)
+            (520.0, 360.0)
         } else {
-            (500.0, 500.0)
+            (520.0, 560.0)
         }
     };
     #[allow(unused_mut)]
@@ -220,7 +220,7 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     )
     .title("Origami")
     .inner_size(w, h)
-    .min_inner_size(360.0, 220.0)
+    .min_inner_size(320.0, 150.0)
     .resizable(true)
     .center();
     #[cfg(target_os = "macos")]

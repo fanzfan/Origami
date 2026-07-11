@@ -397,10 +397,11 @@ export default function App() {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", "已取消");
         else if (msg === "PASSWORD_REQUIRED") {
+          // 先收起进度层再显示密码提示；两者同为模态层时，保留 job 会遮住密码输入框。
+          setJob(null);
           const pw = await askPassword();
           if (pw) {
             setPassword(pw);
-            setJob(null);
             // retry with new password
             const retryId = newJobId();
             setJob({ jobId: retryId, title: "正在解压…", progress: null });

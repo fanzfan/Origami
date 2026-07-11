@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, Progress } from "../api";
+import { UiIcon } from "../icons";
 import { loadSettings } from "../settings";
 
 // 迷你进度窗口：快捷压缩（资源管理器右键 / 关联启动）的「可见」驱动方。
@@ -16,6 +18,28 @@ export function MiniProgress() {
   const [verb, setVerb] = useState("压缩");
   const jobRef = useRef<string | null>(null);
   const started = useRef(false);
+
+  // 独立迷你窗也要跟随界面缩放；后端按 scale=1 创建，非默认缩放时在首帧精调。
+  useLayoutEffect(() => {
+    const scale = loadSettings().scale;
+    const width = Math.round(480 * scale);
+    const height = Math.round(190 * scale);
+    const win = getCurrentWindow();
+    (async () => {
+      try {
+        const factor = await win.scaleFactor();
+        const current = await win.innerSize();
+        const currentWidth = Math.round(current.width / factor);
+        const currentHeight = Math.round(current.height / factor);
+        if (Math.abs(currentWidth - width) <= 1 && Math.abs(currentHeight - height) <= 1) return;
+        await win.setSize(new LogicalSize(width, height));
+        await win.center();
+      } catch {
+        await win.setSize(new LogicalSize(width, height));
+        await win.center();
+      }
+    })();
+  }, []);
 
   // 进度事件 → 更新进度条。
   useEffect(() => {
@@ -123,21 +147,32 @@ export function MiniProgress() {
   const pct = prog && prog.total > 0 ? Math.min(100, (prog.current / prog.total) * 100) : null;
 
   return (
-    <div className="mini-progress" data-tauri-drag-region>
-      <div className="mini-title">
-        {error ? `${verb}失败` : done ? `${verb}完成 ✓` : `正在${verb}…`}
+    <div className={`mini-progress task-progress ${error ? "has-error" : ""} ${done ? "is-done" : ""}`} data-tauri-drag-region>
+      <div className="task-progress-head" data-tauri-drag-region>
+        <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
+          <UiIcon name={done ? "verify" : verb === "解压" ? "extract" : "archive"} size={20} />
+        </span>
+        <div className="task-progress-heading" data-tauri-drag-region>
+          <div className="modal-eyebrow">快捷任务</div>
+          <div className="mini-title">
+            {error ? `${verb}失败` : done ? `${verb}完成` : `正在${verb}…`}
+          </div>
+        </div>
+        <strong className="task-progress-percent">
+          {error ? "!" : done ? "100%" : pct === null ? "—" : `${pct.toFixed(0)}%`}
+        </strong>
       </div>
       <div
         className={`progressbar ${pct === null && !done && !error ? "indeterminate" : ""}`}
       >
         <div style={{ width: `${done ? 100 : pct ?? 30}%` }} />
       </div>
-      <div className="mini-row">
-        <span className="progress-file">
+      <div className="mini-row task-progress-bottom">
+        <span className={`progress-file ${error ? "error-text" : ""}`}>
           {error
             ? error
             : done
-              ? ""
+              ? "任务已完成"
               : prog
                 ? prog.total > 0
                   ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`

@@ -3,6 +3,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, PendingAction, Progress } from "../api";
+import { UiIcon } from "../icons";
 import { loadSettings } from "../settings";
 import { CreateDialog, ExtractDialog } from "./dialogs";
 
@@ -17,6 +18,7 @@ export function AskDialog() {
   const [error, setError] = useState<string | null>(null);
   const jobRef = useRef<string | null>(null);
   const started = useRef(false);
+  const resizeSeq = useRef(0);
 
   const isAsk = (a: PendingAction) =>
     (a.kind === "create" && a.format === "ask") || (a.kind === "extract" && a.mode === "ask");
@@ -27,28 +29,40 @@ export function AskDialog() {
   // 仅当实际尺寸与目标不符（非默认缩放，或队列切到另一类对话框）才 setSize+center，避免弹出闪烁。
   const currentKind = queue[idx]?.kind;
   useLayoutEffect(() => {
-    if (!currentKind) return;
+    const layout = busy ? "progress" : currentKind;
+    if (!layout) return;
+    const seq = ++resizeSeq.current;
+    let cancelled = false;
+    const isStale = () => cancelled || seq !== resizeSeq.current;
     const s = loadSettings().scale;
-    const [w, h] = currentKind === "extract" ? [500, 268] : [500, 500];
+    const [w, h] = layout === "progress" ? [480, 220] : layout === "extract" ? [520, 360] : [520, 560];
     const tw = Math.round(w * s);
     const th = Math.round(h * s);
     const win = getCurrentWindow();
     (async () => {
       try {
         const factor = await win.scaleFactor();
+        if (isStale()) return;
         const cur = await win.innerSize(); // 物理像素，换算回逻辑像素与目标比较
+        if (isStale()) return;
         const cw = Math.round(cur.width / factor);
         const ch = Math.round(cur.height / factor);
         if (Math.abs(cw - tw) <= 1 && Math.abs(ch - th) <= 1) return; // 已是目标尺寸，跳过
         await win.setSize(new LogicalSize(tw, th));
+        if (isStale()) return;
         await win.center();
       } catch {
+        if (isStale()) return;
         // 兜底：拿不到当前尺寸时直接精调一次。
         await win.setSize(new LogicalSize(tw, th));
+        if (isStale()) return;
         await win.center();
       }
     })();
-  }, [currentKind]);
+    return () => {
+      cancelled = true;
+    };
+  }, [busy, currentKind]);
 
   // 进度事件 → 更新进度条。
   useEffect(() => {
@@ -142,13 +156,22 @@ export function AskDialog() {
   if (busy) {
     const pct = prog && prog.total > 0 ? Math.min(100, (prog.current / prog.total) * 100) : null;
     return (
-      <div className="mini-progress" data-tauri-drag-region>
-        <div className="mini-title">{error ? `${busy.verb}失败` : `正在${busy.verb}…`}</div>
+      <div className={`mini-progress task-progress ${error ? "has-error" : ""}`} data-tauri-drag-region>
+        <div className="task-progress-head" data-tauri-drag-region>
+          <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
+            <UiIcon name={busy.verb === "解压" ? "extract" : "archive"} size={20} />
+          </span>
+          <div className="task-progress-heading" data-tauri-drag-region>
+            <div className="modal-eyebrow">执行任务</div>
+            <div className="mini-title">{error ? `${busy.verb}失败` : `正在${busy.verb}…`}</div>
+          </div>
+          <strong className="task-progress-percent">{error ? "!" : pct === null ? "—" : `${pct.toFixed(0)}%`}</strong>
+        </div>
         <div className={`progressbar ${pct === null && !error ? "indeterminate" : ""}`}>
           <div style={{ width: `${pct ?? 30}%` }} />
         </div>
-        <div className="mini-row">
-          <span className="progress-file">
+        <div className="mini-row task-progress-bottom">
+          <span className={`progress-file ${error ? "error-text" : ""}`}>
             {error
               ? error
               : prog
@@ -158,7 +181,7 @@ export function AskDialog() {
                 : "准备中…"}
           </span>
           {error ? (
-            <button className="btn sm" onClick={next}>关闭</button>
+            <button className="btn sm" onClick={next}><UiIcon name="close" size={14} />关闭</button>
           ) : (
             <button className="btn sm" onClick={() => jobRef.current && api.cancelJob(jobRef.current)}>
               取消
