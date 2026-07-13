@@ -675,13 +675,13 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
   line-height: 1.45;
 }
 
-/* ask 小窗使用同一套卡片与折纸蓝背景。仅 macOS 为覆盖式交通灯让位。 */
-:root[data-window="ask"] body,
+/* ask 小窗使用同一套卡片与折纸蓝背景；无原生装饰，标题区负责拖动。 */
 :root[data-window="mini"] body {
   background:
     radial-gradient(circle at 88% -8%, color-mix(in srgb, var(--accent-alt) 12%, transparent), transparent 38%),
     var(--bg);
 }
+:root[data-window="ask"] body { background: transparent; }
 [data-window="ask"] .overlay { background: transparent; align-items: stretch; padding: 12px; backdrop-filter: none; }
 [data-window="ask"] .modal {
   flex: 1;
@@ -693,8 +693,6 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
 }
 [data-window="ask"] .modal .body { flex: 1; min-height: 0; }
 [data-window="ask"] .modal-header { -webkit-app-region: drag; }
-:root[data-window="ask"][data-platform="macos"] .modal-header { padding-top: 36px; padding-left: 82px; }
-:root[data-window="ask"][data-platform="macos"] .modal-close { display: none; }
 
 /* ---------- settings ---------- */
 .settings-section { font-size: 12px; color: var(--text-dim); font-weight: 600; margin: 8px 0 -3px; }

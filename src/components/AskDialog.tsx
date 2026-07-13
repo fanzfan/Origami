@@ -25,8 +25,8 @@ export function AskDialog() {
   const isAsk = (a: PendingAction) =>
     (a.kind === "create" && a.format === "ask") || (a.kind === "extract" && a.mode === "ask");
 
-  // 窗口贴合卡片：按对话框类型给确定尺寸（压缩表单较高、解压较矮），再乘界面缩放 s。
-  // 卡片铺满窗口、footer 固定可见；标题栏交通灯由卡片 header 顶部内边距让位（见 styles.css）。
+  // 窗口贴合卡片：按对话框类型给足以完整显示表单的尺寸，再乘界面缩放 s。
+  // 卡片铺满窗口、footer 固定可见；超大缩放时限制在屏幕工作区内，正文仍可滚动。
   // 后端 spawn_ask_window 已按队首类型（scale=1）预设窗口尺寸，故默认缩放下这里应是 no-op：
   // 仅当实际尺寸与目标不符（非默认缩放，或队列切到另一类对话框）才 setSize+center，避免弹出闪烁。
   const currentKind = queue[idx]?.kind;
@@ -37,9 +37,9 @@ export function AskDialog() {
     let cancelled = false;
     const isStale = () => cancelled || seq !== resizeSeq.current;
     const s = loadSettings().scale;
-    const [w, h] = layout === "progress" ? [480, 220] : layout === "extract" ? [520, 360] : [520, 560];
-    const tw = Math.round(w * s);
-    const th = Math.round(h * s);
+    const [w, h] = layout === "progress" ? [480, 220] : layout === "extract" ? [520, 430] : [520, 620];
+    const tw = Math.min(Math.round(w * s), Math.max(320, window.screen.availWidth - 48));
+    const th = Math.min(Math.round(h * s), Math.max(220, window.screen.availHeight - 48));
     const win = getCurrentWindow();
     (async () => {
       try {

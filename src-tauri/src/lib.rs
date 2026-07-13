@@ -189,7 +189,7 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 /// 创建「ask」小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
 /// 只渲染对应对话框（就是应用内那个子窗口卡片），完成即关闭，不打开完整主窗。
-/// 不透明、无毛玻璃；内嵌标题栏让交通灯浮于卡片背景之上。
+/// 不透明、无毛玻璃；各平台统一使用前端可拖动标题区，避免 macOS 交通灯挤占卡片。
 ///
 /// 初始尺寸按队首交互动作的类型预设，力求与前端 scale=1 时的最终尺寸完全一致：
 /// 这样默认缩放下前端无需再 setSize/center，避免「弹出后再缩放+重居中」的一次闪烁
@@ -207,13 +207,12 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
             Some(PendingAction::Extract { .. })
         );
         if first_is_extract {
-            (520.0, 360.0)
+            (520.0, 430.0)
         } else {
-            (520.0, 560.0)
+            (520.0, 620.0)
         }
     };
-    #[allow(unused_mut)]
-    let mut b = tauri::WebviewWindowBuilder::new(
+    tauri::WebviewWindowBuilder::new(
         app,
         "ask",
         tauri::WebviewUrl::App("index.html?ask=1".into()),
@@ -222,18 +221,12 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     .inner_size(w, h)
     .min_inner_size(320.0, 150.0)
     .resizable(true)
-    .center();
-    #[cfg(target_os = "macos")]
-    {
-        b = b
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true);
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        b = b.decorations(false);
-    }
-    b.build().map(|_| ()).map_err(|e| e.to_string())
+    .decorations(false)
+    .transparent(cfg!(target_os = "macos"))
+    .center()
+    .build()
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
 type CmdResult<T> = Result<T, String>;
