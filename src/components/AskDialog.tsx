@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
@@ -11,9 +12,10 @@ import { CreateDialog, ExtractDialog } from "./dialogs";
 // 只渲染对应对话框；确认后就地跑任务并显示进度，队列处理完即关闭小窗（见 finishAskWindow）。
 // 与主窗共用同一套 CreateDialog / ExtractDialog 组件与后端命令。
 export function AskDialog() {
+  const { t } = useTranslation();
   const [queue, setQueue] = useState<PendingAction[]>([]);
   const [idx, setIdx] = useState(0);
-  const [busy, setBusy] = useState<{ verb: string } | null>(null);
+  const [busy, setBusy] = useState<{ verb: "compress" | "extract" } | null>(null);
   const [prog, setProg] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const jobRef = useRef<string | null>(null);
@@ -115,7 +117,7 @@ export function AskDialog() {
       sources: string[],
       p: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number },
     ) => {
-      setBusy({ verb: "压缩" });
+      setBusy({ verb: "compress" });
       const jobId = newJobId();
       jobRef.current = jobId;
       try {
@@ -124,15 +126,15 @@ export function AskDialog() {
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") next();
-        else setError(`压缩失败：${msg}`);
+        else setError(t("app.error.compress", { message: msg }));
       }
     },
-    [next],
+    [next, t],
   );
 
   const runExtract = useCallback(
     async (path: string, dest: string, smart: boolean) => {
-      setBusy({ verb: "解压" });
+      setBusy({ verb: "extract" });
       const jobId = newJobId();
       jobRef.current = jobId;
       try {
@@ -146,10 +148,10 @@ export function AskDialog() {
           // 加密归档：交给主窗打开，让用户输入密码后在应用内解压。
           await api.requestOpenInMain([path]);
           next();
-        } else setError(`解压失败：${msg}`);
+        } else setError(t("app.error.extract", { message: msg }));
       }
     },
-    [next],
+    [next, t],
   );
 
   // 跑任务时显示进度（复用迷你窗样式）。
@@ -159,11 +161,13 @@ export function AskDialog() {
       <div className={`mini-progress task-progress ${error ? "has-error" : ""}`} data-tauri-drag-region>
         <div className="task-progress-head" data-tauri-drag-region>
           <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
-            <UiIcon name={busy.verb === "解压" ? "extract" : "archive"} size={20} />
+            <UiIcon name={busy.verb === "extract" ? "extract" : "archive"} size={20} />
           </span>
           <div className="task-progress-heading" data-tauri-drag-region>
-            <div className="modal-eyebrow">执行任务</div>
-            <div className="mini-title">{error ? `${busy.verb}失败` : `正在${busy.verb}…`}</div>
+            <div className="modal-eyebrow">{t("task.execute")}</div>
+            <div className="mini-title">
+              {error ? t(`task.failed.${busy.verb}`) : t(`task.running.${busy.verb}`)}
+            </div>
           </div>
           <strong className="task-progress-percent">{error ? "!" : pct === null ? "—" : `${pct.toFixed(0)}%`}</strong>
         </div>
@@ -178,13 +182,13 @@ export function AskDialog() {
                 ? prog.total > 0
                   ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
                   : `${fmtSize(prog.current)} · ${prog.file}`
-                : "准备中…"}
+                : t("common.preparing")}
           </span>
           {error ? (
-            <button className="btn sm" onClick={next}><UiIcon name="close" size={14} />关闭</button>
+            <button className="btn sm" onClick={next}><UiIcon name="close" size={14} />{t("common.close")}</button>
           ) : (
             <button className="btn sm" onClick={() => jobRef.current && api.cancelJob(jobRef.current)}>
-              取消
+              {t("common.cancel")}
             </button>
           )}
         </div>

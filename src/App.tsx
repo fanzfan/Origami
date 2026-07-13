@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -42,6 +43,7 @@ function loadRecent(): string[] {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [archivePath, setArchivePath] = useState<string | null>(null);
   const [info, setInfo] = useState<ArchiveInfo | null>(null);
   const [fsListing, setFsListing] = useState<DirListing | null>(null);
@@ -142,15 +144,15 @@ export default function App() {
             await openArchive(path, entered, enc);
             return;
           }
-          toast("info", "已取消打开加密归档");
+          toast("info", t("app.info.encryptedOpenCancelled"));
         } else {
-          toast("error", `打开失败：${msg}`);
+          toast("error", t("app.error.open", { message: msg }));
         }
       } finally {
         setLoading(false);
       }
     },
-    [encoding, addRecent, askPassword, toast],
+    [encoding, addRecent, askPassword, toast, t],
   );
 
   const reopenWithEncoding = useCallback(
@@ -175,12 +177,12 @@ export default function App() {
         const listing = await api.listDir(path);
         setFsListing(listing);
       } catch (e) {
-        toast("error", `无法打开目录：${e}`);
+        toast("error", t("app.error.browseDirectory", { message: String(e) }));
       } finally {
         setFsLoading(false);
       }
     },
-    [toast],
+    [toast, t],
   );
 
   // 从压缩包路径栏跳到某个真实目录（离开压缩包，进入文件系统视图）。"" = 此电脑。
@@ -233,7 +235,7 @@ export default function App() {
       const jobId = newJobId();
       try {
         const dest = await api.defaultCreateDest(sources, format);
-        if (!useMini) setJob({ jobId, title: "正在压缩…", progress: null });
+        if (!useMini) setJob({ jobId, title: t("app.status.compressing"), progress: null });
         const out = await api.createArchive({
           jobId,
           dest,
@@ -242,21 +244,21 @@ export default function App() {
           level: settings.level,
           excludeJunk: settings.excludeJunk,
         });
-        toast("ok", `压缩完成：${out.split("/").pop()}`);
+        toast("ok", t("app.success.compressedFile", { name: out.split(/[\\/]/).pop() }));
         return true;
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") {
-          toast("info", "已取消");
+          toast("info", t("common.cancelled"));
           return true;
         }
-        toast("error", `压缩失败：${msg}`);
+        toast("error", t("app.error.compress", { message: msg }));
         return false;
       } finally {
         if (!useMini) setJob(null);
       }
     },
-    [toast, settings.level, settings.excludeJunk],
+    [toast, settings.level, settings.excludeJunk, t],
   );
 
   /** 快捷解压（主窗可见时用应用内进度）。返回是否成功（取消视为成功）。 */
@@ -265,16 +267,16 @@ export default function App() {
       const jobId = newJobId();
       try {
         const dest = await api.quickExtractDest(path, mode);
-        if (!useMini) setJob({ jobId, title: "正在解压…", progress: null });
+        if (!useMini) setJob({ jobId, title: t("app.status.extracting"), progress: null });
         // "smart" → 智能解压（多个顶层文件自动套一层文件夹）；"here"/"folder" → 原样。
         const out = await api.extractArchive({ jobId, path, dest, smart: mode === "smart" });
-        toast("ok", `解压完成：${out.split(/[\\/]/).pop()}`);
+        toast("ok", t("app.success.extractedFile", { name: out.split(/[\\/]/).pop() }));
         if (settings.openAfterExtract) openPath(out).catch(() => {});
         return true;
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") {
-          toast("info", "已取消");
+          toast("info", t("common.cancelled"));
           return true;
         }
         if (msg === "PASSWORD_REQUIRED") {
@@ -282,13 +284,13 @@ export default function App() {
           openArchive(path);
           return true;
         }
-        toast("error", `解压失败：${msg}`);
+        toast("error", t("app.error.extract", { message: msg }));
         return false;
       } finally {
         if (!useMini) setJob(null);
       }
     },
-    [toast, settings.openAfterExtract, openArchive],
+    [toast, settings.openAfterExtract, openArchive, t],
   );
 
   const draining = useRef(false);
@@ -359,10 +361,10 @@ export default function App() {
   const pickArchive = useCallback(async () => {
     const sel = await openDialog({
       multiple: false,
-      filters: [{ name: "压缩文件", extensions: ARCHIVE_EXTS }],
+      filters: [{ name: t("app.dialog.archiveFilter"), extensions: ARCHIVE_EXTS }],
     });
     if (typeof sel === "string") openArchive(sel);
-  }, [openArchive]);
+  }, [openArchive, t]);
 
   const pickFilesToCompress = useCallback(async () => {
     const sel = await openDialog({ multiple: true });
@@ -380,7 +382,7 @@ export default function App() {
       if (!archivePath) return;
       const jobId = newJobId();
       setExtractFor(null);
-      setJob({ jobId, title: "正在解压…", progress: null });
+      setJob({ jobId, title: t("app.status.extracting"), progress: null });
       try {
         const out = await api.extractArchive({
           jobId,
@@ -391,11 +393,11 @@ export default function App() {
           entries,
           smart,
         });
-        toast("ok", "解压完成");
+        toast("ok", t("app.success.extracted"));
         if (settings.openAfterExtract) openPath(out).catch(() => {});
       } catch (e) {
         const msg = String(e);
-        if (msg === "CANCELLED") toast("info", "已取消");
+        if (msg === "CANCELLED") toast("info", t("common.cancelled"));
         else if (msg === "PASSWORD_REQUIRED") {
           // 先收起进度层再显示密码提示；两者同为模态层时，保留 job 会遮住密码输入框。
           setJob(null);
@@ -404,7 +406,7 @@ export default function App() {
             setPassword(pw);
             // retry with new password
             const retryId = newJobId();
-            setJob({ jobId: retryId, title: "正在解压…", progress: null });
+            setJob({ jobId: retryId, title: t("app.status.extracting"), progress: null });
             try {
               const out = await api.extractArchive({
                 jobId: retryId,
@@ -415,18 +417,18 @@ export default function App() {
                 entries,
                 smart,
               });
-              toast("ok", "解压完成");
+              toast("ok", t("app.success.extracted"));
               if (settings.openAfterExtract) openPath(out).catch(() => {});
             } catch (e2) {
-              toast("error", `解压失败：${e2}`);
+              toast("error", t("app.error.extract", { message: String(e2) }));
             }
           }
-        } else toast("error", `解压失败：${msg}`);
+        } else toast("error", t("app.error.extract", { message: msg }));
       } finally {
         setJob(null);
       }
     },
-    [archivePath, password, encoding, toast, askPassword, settings.openAfterExtract],
+    [archivePath, password, encoding, toast, askPassword, settings.openAfterExtract, t],
   );
 
   const runCreate = useCallback(
@@ -434,64 +436,64 @@ export default function App() {
       const sources = createFor!;
       const jobId = newJobId();
       setCreateFor(null);
-      setJob({ jobId, title: "正在压缩…", progress: null });
+      setJob({ jobId, title: t("app.status.compressing"), progress: null });
       try {
         await api.createArchive({ jobId, sources, excludeJunk: settings.excludeJunk, ...p });
-        toast("ok", "压缩完成");
+        toast("ok", t("app.success.compressed"));
         // 文件系统视图下刷新当前目录，让新建的压缩包立即出现。
         if (fsListing) browseDir(fsListing.path);
       } catch (e) {
         const msg = String(e);
-        if (msg === "CANCELLED") toast("info", "已取消");
-        else toast("error", `压缩失败：${msg}`);
+        if (msg === "CANCELLED") toast("info", t("common.cancelled"));
+        else toast("error", t("app.error.compress", { message: msg }));
       } finally {
         setJob(null);
       }
     },
-    [createFor, toast, settings.excludeJunk, fsListing, browseDir],
+    [createFor, toast, settings.excludeJunk, fsListing, browseDir, t],
   );
 
   const runAdd = useCallback(
     async (dir: string) => {
       if (!archivePath) return;
-      const sel = await openDialog({ multiple: true, title: "选择要添加的文件" });
+      const sel = await openDialog({ multiple: true, title: t("app.dialog.addFiles") });
       const sources = Array.isArray(sel) ? sel : typeof sel === "string" ? [sel] : [];
       if (sources.length === 0) return;
       const jobId = newJobId();
-      setJob({ jobId, title: "正在添加文件…", progress: null });
+      setJob({ jobId, title: t("app.status.adding"), progress: null });
       try {
         await api.archiveAdd({ jobId, path: archivePath, sources, dir, password, encoding });
-        toast("ok", `已添加 ${sources.length} 项`);
+        toast("ok", t("app.success.added", { count: sources.length }));
         await openArchive(archivePath, password, encoding);
       } catch (e) {
         const msg = String(e);
-        if (msg === "CANCELLED") toast("info", "已取消");
-        else toast("error", `添加失败：${msg}`);
+        if (msg === "CANCELLED") toast("info", t("common.cancelled"));
+        else toast("error", t("app.error.add", { message: msg }));
       } finally {
         setJob(null);
       }
     },
-    [archivePath, password, encoding, openArchive, toast],
+    [archivePath, password, encoding, openArchive, toast, t],
   );
 
   const runRemove = useCallback(
     async (entries: string[]) => {
       if (!archivePath || entries.length === 0) return;
       const jobId = newJobId();
-      setJob({ jobId, title: "正在删除条目…", progress: null });
+      setJob({ jobId, title: t("app.status.removing"), progress: null });
       try {
         await api.archiveRemove({ jobId, path: archivePath, entries, password, encoding });
-        toast("ok", `已删除 ${entries.length} 项`);
+        toast("ok", t("app.success.removed", { count: entries.length }));
         await openArchive(archivePath, password, encoding);
       } catch (e) {
         const msg = String(e);
-        if (msg === "CANCELLED") toast("info", "已取消");
-        else toast("error", `删除失败：${msg}`);
+        if (msg === "CANCELLED") toast("info", t("common.cancelled"));
+        else toast("error", t("app.error.remove", { message: msg }));
       } finally {
         setJob(null);
       }
     },
-    [archivePath, password, encoding, openArchive, toast],
+    [archivePath, password, encoding, openArchive, toast, t],
   );
 
   const openExternal = useCallback(
@@ -515,30 +517,30 @@ export default function App() {
               const file = await api.extractEntryToTemp({ path: archivePath, entry: entryPath, password: pw, encoding });
               await openPath(file);
             } catch (e2) {
-              toast("error", `打开失败：${e2}`);
+              toast("error", t("app.error.open", { message: String(e2) }));
             }
           }
-        } else toast("error", `打开失败：${msg}`);
+        } else toast("error", t("app.error.open", { message: msg }));
       }
     },
-    [archivePath, password, encoding, askPassword, toast],
+    [archivePath, password, encoding, askPassword, toast, t],
   );
 
   const runTest = useCallback(async () => {
     if (!archivePath) return;
     const jobId = newJobId();
-    setJob({ jobId, title: "正在校验…", progress: null });
+    setJob({ jobId, title: t("app.status.verifying"), progress: null });
     try {
       await api.testArchive(jobId, archivePath, password);
-      toast("ok", "校验通过，归档完好 ✓");
+      toast("ok", t("app.success.verified"));
     } catch (e) {
       const msg = String(e);
-      if (msg === "CANCELLED") toast("info", "已取消");
-      else toast("error", `校验失败：${msg}`);
+      if (msg === "CANCELLED") toast("info", t("common.cancelled"));
+      else toast("error", t("app.error.verify", { message: msg }));
     } finally {
       setJob(null);
     }
-  }, [archivePath, password, toast]);
+  }, [archivePath, password, toast, t]);
 
   const cancelJob = useCallback(() => {
     if (job) api.cancelJob(job.jobId);
@@ -549,9 +551,9 @@ export default function App() {
       const name = archivePath.split(/[\\/]/).pop();
       return info ? `${name} — ${info.format}` : name ?? "";
     }
-    if (fsListing) return fsListing.path || "此电脑";
+    if (fsListing) return fsListing.path || t("app.title.thisComputer");
     return "Origami";
-  }, [archivePath, info, fsListing]);
+  }, [archivePath, info, fsListing, t]);
 
   return (
     <div className="app">
@@ -562,29 +564,29 @@ export default function App() {
         {archivePath && (
           <button className="btn ghost sm" onClick={closeArchive}>
             <UiIcon name="close" />
-            关闭归档
+            {t("app.title.closeArchive")}
           </button>
         )}
         {!archivePath && fsListing && (
-          <button className="btn ghost sm" onClick={() => setFsListing(null)} title="返回主页">
+          <button className="btn ghost sm" onClick={() => setFsListing(null)} title={t("app.title.returnHome")}>
             <UiIcon name="home" />
-            主页
+            {t("app.title.home")}
           </button>
         )}
-        <button className="btn ghost sm titlebar-tool" onClick={() => setShowFinder(true)} title="右键菜单集成" aria-label="右键菜单集成">
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowFinder(true)} title={t("app.title.shellIntegration")} aria-label={t("app.title.shellIntegration")}>
           <UiIcon name="integration" />
         </button>
-        <button className="btn ghost sm titlebar-tool" onClick={() => setShowAssoc(true)} title="文件关联" aria-label="文件关联">
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowAssoc(true)} title={t("app.title.fileAssociations")} aria-label={t("app.title.fileAssociations")}>
           <UiIcon name="link" />
         </button>
-        <button className="btn ghost sm titlebar-tool" onClick={() => setShowPwMgr(true)} title="密码管理器" aria-label="密码管理器">
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowPwMgr(true)} title={t("app.title.passwordManager")} aria-label={t("app.title.passwordManager")}>
           <UiIcon name="key" />
         </button>
-        <button className="btn ghost sm titlebar-tool" onClick={() => setShowSettings(true)} title={isMac ? "设置 (⌘,)" : "设置 (Ctrl+,)"} aria-label="设置">
+        <button className="btn ghost sm titlebar-tool" onClick={() => setShowSettings(true)} title={t(isMac ? "app.title.settingsShortcutMac" : "app.title.settingsShortcutOther")} aria-label={t("app.title.settings")}>
           <UiIcon name="settings" />
         </button>
         {isWin && (
-          <button className="btn ghost sm titlebar-tool win-close" onClick={() => getCurrentWindow().close()} title="关闭" aria-label="关闭窗口">
+          <button className="btn ghost sm titlebar-tool win-close" onClick={() => getCurrentWindow().close()} title={t("common.close")} aria-label={t("app.title.closeWindow")}>
             <UiIcon name="close" />
           </button>
         )}
@@ -611,7 +613,7 @@ export default function App() {
           loading={fsLoading}
           onNavigate={(path) => browseDir(path)}
           onOpenArchive={openArchive}
-          onOpenFile={(path) => openPath(path).catch((e) => toast("error", `打开失败：${e}`))}
+          onOpenFile={(path) => openPath(path).catch((e) => toast("error", t("app.error.open", { message: String(e) })))}
           onCompress={(paths) => setCreateFor(paths)}
         />
       ) : (

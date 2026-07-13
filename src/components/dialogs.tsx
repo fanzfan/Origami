@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
+import { LANGUAGE_OPTIONS, type AppLanguage } from "../i18n";
 import { UiIcon, type UiIconName } from "../icons";
 import type { JobState } from "../App";
 import { ACRYLIC_OPACITY_MAX, ACRYLIC_OPACITY_MIN, FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
@@ -367,62 +369,83 @@ export function CreateDialog(p: {
 
 // ---------------- Settings ----------------
 
-const LEVEL_HINT: Record<number, string> = {
-  0: "仅存储，不压缩（最快）",
-  9: "最高压缩率（最慢）",
-};
-
 export function SettingsDialog(p: {
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const s = p.settings;
   const pct = Math.round(s.scale * 100);
   const setScale = (v: number) => p.onChange({ scale: clampScale(v) });
   const isWin = navigator.userAgent.includes("Windows") || navigator.platform.startsWith("Win");
+  const levelValue = s.level === 0
+    ? t("settings.level.store")
+    : `${s.level}${s.level === 9 ? t("settings.level.highest") : ""}`;
+  const levelHint = s.level === 0
+    ? t("settings.level.storeHint")
+    : s.level === 9
+      ? t("settings.level.highestHint")
+      : t("settings.level.defaultHint");
 
   return (
     <Modal
-      title="设置"
+      title={t("settings.title")}
       onClose={p.onClose}
-      footer={<button className="btn primary" onClick={p.onClose}>完成</button>}
+      footer={<button className="btn primary" onClick={p.onClose}>{t("common.done")}</button>}
     >
-      <div className="settings-section">外观</div>
+      <div className="settings-section">{t("settings.section.general")}</div>
 
       <div className="field">
-        <label>外观模式</label>
+        <label>{t("settings.language.label")}</label>
+        <select
+          value={s.language}
+          onChange={(e) => p.onChange({ language: e.target.value as AppLanguage })}
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.nativeName ?? t("settings.language.system")}
+            </option>
+          ))}
+        </select>
+        <div className="hint">{t("settings.language.hint")}</div>
+      </div>
+
+      <div className="settings-section">{t("settings.section.appearance")}</div>
+
+      <div className="field">
+        <label>{t("settings.appearanceMode")}</label>
         <div className="seg">
-          {MODES.map(([key, name]) => (
+          {MODES.map((key) => (
             <button
               key={key}
               className={`seg-btn ${s.mode === key ? "on" : ""}`}
               onClick={() => p.onChange({ mode: key })}
             >
-              {name}
+              {t(`settings.mode.${key}`)}
             </button>
           ))}
         </div>
       </div>
 
       <div className="field">
-        <label>主题</label>
+        <label>{t("settings.themeLabel")}</label>
         <div className="theme-grid">
-          {THEMES.map(([key, name, color]) => (
+          {THEMES.map(([key, color]) => (
             <div
               key={key}
               className={`theme-swatch ${s.theme === key ? "on" : ""}`}
               onClick={() => p.onChange({ theme: key })}
             >
               <span className="dot" style={{ background: color }} />
-              {name}
+              {t(`settings.theme.${key}`)}
             </div>
           ))}
         </div>
       </div>
 
       <div className="field">
-        <label>界面字体大小：{pct}%</label>
+        <label>{t("settings.scale.label", { percent: pct })}</label>
         <div className="row" style={{ alignItems: "center", gap: 10 }}>
           <button className="btn sm" onClick={() => setScale(s.scale - SCALE_STEP)}>－</button>
           <input
@@ -435,17 +458,17 @@ export function SettingsDialog(p: {
             style={{ flex: 1 }}
           />
           <button className="btn sm" onClick={() => setScale(s.scale + SCALE_STEP)}>＋</button>
-          <button className="btn sm" onClick={() => setScale(1)}>复位</button>
+          <button className="btn sm" onClick={() => setScale(1)}>{t("settings.scale.reset")}</button>
         </div>
-        <div className="hint">快捷键：Ctrl/⌘ 加 + 或 - 调整，Ctrl/⌘ 加 0 复位。</div>
+        <div className="hint">{t("settings.scale.hint")}</div>
       </div>
 
       <div className="field">
-        <label>字体</label>
+        <label>{t("settings.fontLabel")}</label>
         <select value={s.font} onChange={(e) => p.onChange({ font: e.target.value })}>
-          {FONTS.map(([key, name]) => (
+          {FONTS.map(([key]) => (
             <option key={key} value={key}>
-              {name}
+              {t(`settings.font.${key}`)}
             </option>
           ))}
         </select>
@@ -453,18 +476,18 @@ export function SettingsDialog(p: {
 
       {isWin ? (
         <div className="field">
-          <label>窗口材质</label>
+          <label>{t("settings.material.label")}</label>
           <select value={s.material} onChange={(e) => p.onChange({ material: e.target.value as Settings["material"] })}>
-            {MATERIALS.map(([key, name]) => (
+            {MATERIALS.map((key) => (
               <option key={key} value={key}>
-                {name}
+                {t(`settings.material.${key}`)}
               </option>
             ))}
           </select>
-          <div className="hint">Windows 11 可选亚克力 / 云母（Mica）/ 无；需系统「透明效果」开启，材质感来自桌面壁纸。旧系统不支持时自动保持不透明。</div>
+          <div className="hint">{t("settings.material.windowsHint")}</div>
           {s.material === "acrylic" && (
             <div style={{ marginTop: 10 }}>
-              <label>亚克力透明度：{100 - s.acrylicOpacity}%</label>
+              <label>{t("settings.material.opacity", { percent: 100 - s.acrylicOpacity })}</label>
               <input
                 type="range"
                 min={100 - ACRYLIC_OPACITY_MAX}
@@ -473,7 +496,7 @@ export function SettingsDialog(p: {
                 onChange={(e) => p.onChange({ acrylicOpacity: 100 - Number(e.target.value) })}
                 style={{ width: "100%" }}
               />
-              <div className="hint">仅亚克力可调：向右更透（桌面/模糊透出更多），向左更实。</div>
+              <div className="hint">{t("settings.material.opacityHint")}</div>
             </div>
           )}
         </div>
@@ -485,19 +508,16 @@ export function SettingsDialog(p: {
             onChange={(e) => p.onChange({ material: e.target.checked ? "acrylic" : "none" })}
           />
           <span className="grow">
-            窗口材质效果
-            <div className="hint">macOS 显示毛玻璃；旧系统不支持时自动保持不透明。</div>
+            {t("settings.material.effect")}
+            <div className="hint">{t("settings.material.macHint")}</div>
           </span>
         </label>
       )}
 
-      <div className="settings-section">压缩与解压</div>
+      <div className="settings-section">{t("settings.section.archive")}</div>
 
       <div className="field">
-        <label>
-          默认压缩等级：{s.level === 0 ? "仅存储" : s.level}
-          {s.level === 9 ? "（最高）" : ""}
-        </label>
+        <label>{t("settings.level.label", { value: levelValue })}</label>
         <input
           type="range"
           min={0}
@@ -505,7 +525,7 @@ export function SettingsDialog(p: {
           value={s.level}
           onChange={(e) => p.onChange({ level: Number(e.target.value) })}
         />
-        <div className="hint">{LEVEL_HINT[s.level] ?? "压缩率与速度的平衡，新建压缩时作为默认值。"}</div>
+        <div className="hint">{levelHint}</div>
       </div>
 
       <label className="toggle-row">
@@ -515,8 +535,8 @@ export function SettingsDialog(p: {
           onChange={(e) => p.onChange({ excludeJunk: e.target.checked })}
         />
         <span className="grow">
-          压缩时排除系统垃圾文件
-          <div className="hint">自动跳过 .DS_Store、__MACOSX、._ 资源派生、Thumbs.db、desktop.ini 等。</div>
+          {t("settings.excludeJunk.label")}
+          <div className="hint">{t("settings.excludeJunk.hint")}</div>
         </span>
       </label>
 
@@ -527,8 +547,8 @@ export function SettingsDialog(p: {
           onChange={(e) => p.onChange({ openAfterExtract: e.target.checked })}
         />
         <span className="grow">
-          解压后打开目标文件夹
-          <div className="hint">解压完成后自动在资源管理器 / 访达中打开解压出的目录。</div>
+          {t("settings.openAfterExtract.label")}
+          <div className="hint">{t("settings.openAfterExtract.hint")}</div>
         </span>
       </label>
     </Modal>

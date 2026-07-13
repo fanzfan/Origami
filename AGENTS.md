@@ -1,63 +1,65 @@
 # AGENTS.md
 
-面向在本仓库工作的 Codex 实例的指引。Origami 是 Tauri 2 + Rust + React/TS 的跨平台压缩包管理器。
+面向在本仓库工作的 Codex 实例。Origami 是 Tauri 2 + Rust + React/TypeScript 的跨平台压缩包管理器。
 
 ## 校验命令
 
 改动后务必跑通：
 
 ```bash
-npx tsc --noEmit                  # 前端类型检查
-cd src-tauri && cargo check       # 后端编译检查（在 src-tauri 目录）
+npx tsc --noEmit
+cd src-tauri && cargo check
 ```
 
-运行 / 构建：
+运行和构建：
 
 ```bash
-npm run tauri dev                 # 开发模式
-npm run tauri build               # 发行构建（.app / .dmg 等）
+npm run tauri dev
+npm run tauri build
 ```
 
-`cargo` 不在默认 PATH 时：`export PATH="$HOME/.cargo/bin:$PATH"`。
+## 跨平台交付
 
-## 跨平台交付约束（重要）
+- 平台依赖放入 `[target.'cfg(...)'.dependencies]`，平台代码使用 `#[cfg(target_os = "...")]` 隔离。
+- `cargo check` 只覆盖当前目标；修改平台专属分支后，应在对应系统上补做编译与运行验证。不要把缺少目标平台 C 工具链导致的交叉编译失败当成业务代码错误。
+- Windows 环境需要 Rust MSVC 工具链、WebView2 Runtime、Visual Studio Build Tools（C++ 工作负载）。
+- macOS 的打包版与开发版 bundle id 相同。LaunchServices 若将 `/Applications/Origami.app` 带到前台，应以最新 `npm run tauri build` 产物覆盖安装后再验证。
 
-**开发机是 macOS，无法编译/测试 Windows 产物。** 对 Windows 功能：
+涉及 Windows 分支时重点验证：
 
-- 编写完整的 Rust 代码 + 构建脚本，由用户在 Windows 上自行验证。
-- 用 `[target.'cfg(target_os = "windows")'.dependencies]` 隔离平台依赖，用 `#[cfg(target_os = "...")]` 隔离平台代码。
-- 保证 **macOS 构建仍能编译**：`cargo check`（darwin 目标）+ `tsc` 必须干净。
-- 不要尝试 `cargo check --target x86_64-pc-windows-msvc`——C 工具链（liblzma 等）无法交叉编译，这是预期限制，不是代码错误。
+- `winassoc.rs`：勾选/取消文件关联后，资源管理器默认程序正确变更和还原。
+- `winmenu.rs`：经典右键菜单安装后可启动 Origami，移除后注册表项消失。
+- `sysauth.rs`：Windows Hello 成功、取消和不可用三条路径都不会泄露明文或锁死用户。
+- `passwords.rs`：`passwords.json` 仅含 id、备注和时间戳；凭据 service 为 `dev.vela.origami.passwords`；删除时同步删除凭据。
+- `App.tsx`：`Ctrl + ,` 与 `Ctrl + +/-/0` 正常。
+- `windows-extension/`：按 README 构建、签名和注册后验证 Win11 新版顶层菜单。
 
-### 在 Windows 上验证（交给用户执行）
+涉及 macOS 分支时重点验证：
 
-环境：Rust MSVC 工具链、WebView2 Runtime、VS Build Tools（C++ 工作负载）。命令：`npx tsc --noEmit`、`cd src-tauri; cargo check`、`npm run tauri dev` / `npm run tauri build`。Windows 没有 macOS 的「旧 app 抢前台」坑，`tauri dev` 即所见即当前代码。
-
-每次涉及 Windows 分支的改动，提示用户按此清单实测：
-
-- **文件关联**（`winassoc.rs`）：关联面板勾选/取消 → 资源管理器默认程序随之变更并能还原。
-- **经典右键菜单**（`winmenu.rs`）：安装后文件右键出现 Origami 项并能打开；移除后干净消失。
-- **Windows Hello 密码门控**（`sysauth.rs`）：查看明文前弹 Hello；取消则不显示；无 Hello 不被锁死。
-- **密码存储到凭据管理器**（`passwords.rs` + keyring）：添加密码后，`passwords.json` 只应有 id/备注/时间戳（无明文），明文应出现在「凭据管理器 → Windows 凭据」里 service `dev.vela.origami.passwords`；删除后凭据条目一并消失。
-- **快捷键**（`App.tsx`）：`Ctrl + ,` 开设置；`Ctrl + +/-/0` 调字号/复位。
-- **Win11 新版顶层菜单**（`windows-extension/`）：跑 `build.ps1` 并按其 README 完成签名注册后验证。
+- `macassoc.rs`：文件关联写入、取消和回退处理器正确。
+- `services.rs`：Finder Quick Action 安装/移除、压缩/解压深链与目标路径正确。
+- `sysauth.rs` / `passwords.rs`：系统认证与钥匙串读写、迁移、删除正常。
+- `Cmd + ,` 与 `Cmd + +/-/0` 正常。
 
 ## 架构
 
-- **命令注册**：后端命令在 `src-tauri/src/lib.rs` 用 `#[tauri::command]` 定义并在 `tauri::generate_handler!` 注册；前端在 `src/api.ts` 用 `invoke` 封装后供组件调用。三处要一致。
-- **平台分发模式**：跨平台能力（系统认证、文件关联）在 `lib.rs` 暴露统一命令，内部按 `#[cfg]` 分发到 `sysauth.rs` / `macassoc.rs` / `winassoc.rs`；不支持的平台给出安全的默认行为。
-- **窗口显隐**：主窗口 `visible: false`，前端挂载后调用 `frontend_ready` 命令才 `show()`；快捷压缩启动时改用 `mini` 进度窗口。
-- **重活异步化**：解压/压缩等阻塞操作用 `spawn_blocking`，通过 job + 进度事件回传前端，可取消。
-- **密码门控**：密码管理器展示明文前先 `system_auth`（Touch ID / Windows Hello）；认证不可用时放行，认证出错时不要把用户锁死在外。
-- **密码存储**：`passwords.rs` 用 `keyring` crate 把明文存进系统凭据库（钥匙串 / 凭据管理器，service `dev.vela.origami.passwords`、account 为每条的随机 id）；`passwords.json` 只存索引（id/备注/时间戳），不落明文。旧版明文文件在 `load`/`add` 等入口自动迁移（写入 keyring 后剥离 password 字段并回写）。keyring 按平台启用 `apple-native` / `windows-native` 后端。
+- **命令注册**：后端命令在 `src-tauri/src/lib.rs` 定义并在 `tauri::generate_handler!` 注册；前端在 `src/api.ts` 封装。三处必须一致。
+- **平台分发**：跨平台命令在 `lib.rs` 暴露统一接口，再按 `#[cfg]` 分发到平台模块；不支持的平台返回安全默认值。
+- **窗口显隐**：主窗口初始 `visible: false`，前端挂载后调用 `frontend_ready`；无需交互的快捷任务由 `mini` 窗口驱动，需要设置的任务由 `ask` 窗口驱动。
+- **重活异步化**：解压、压缩等阻塞任务使用 `spawn_blocking`，通过 job、进度事件和取消命令与前端协作。
+- **密码门控**：展示明文前先调用 `system_auth`；认证不可用时放行，认证失败或用户取消时不显示，认证机制异常时不能把用户锁死。
+- **密码存储**：明文只写入系统凭据库；`passwords.json` 只保存索引。旧版明文在加载和写入入口自动迁移。
 
-## 约定
+## 国际化
 
-- UI、注释、用户可见文案用中文。
-- 遵循现有代码风格；优先编辑既有文件，不无故新建。
-- 单文件「用默认程序打开」走 `extract_entry_to_temp` 解压到 `app_cache_dir` 再用 opener 打开。
-- 快捷键修饰键按平台自适应：macOS 用 Cmd（`metaKey`），Windows/Linux 用 Ctrl（`ctrlKey`），与主流应用习惯一致。前端用 `navigator.platform`/`userAgent` 检测，见 `App.tsx` 的 keydown handler。
+- 注释和开发文档使用中文；用户可见文案必须通过 `src/i18n/locales/` 的资源键提供，不再直接写死中文。
+- 当前支持 `zh-CN` 与 `en-US`，语言偏好还包含 `system`。新增语言时同步扩展资源、语言类型和设置选项。
+- 使用稳定的语义 key 与 i18next 插值/复数能力，不以中文原文为 key，不在 JSX 中拼接可翻译句子。
+- 每次迁移文案同时维护中英文；允许分批迁移旧界面，但同一功能区应完整迁移，避免一个弹窗内中英混杂。
 
-## 本地测试的坑
+## 代码约定
 
-`npm run tauri dev` 会被**已安装的 `/Applications/Origami.app`** 干扰：macOS LaunchServices 会按 bundle id（`dev.vela.origami`）把已安装的那份带到前台，于是看到的是旧 UI 而非开发版。要可靠地在本机验证当前代码，最稳的做法是 `npm run tauri build` 后把新产物装到 `/Applications` 再测，而不是和 dev server 的窗口显隐/缓存较劲。
+- 遵循现有代码风格，优先编辑既有文件；只有资源、平台模块或职责明确时才新建文件。
+- 单文件“用默认程序打开”走 `extract_entry_to_temp` 解压到 `app_cache_dir`，再交给 opener。
+- 快捷键修饰键按平台自适应：macOS 使用 `metaKey`，Windows/Linux 使用 `ctrlKey`。
+- 保留并尊重工作区已有改动，不覆盖与当前任务无关的内容。

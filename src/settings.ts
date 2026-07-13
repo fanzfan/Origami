@@ -1,3 +1,5 @@
+import { applyLanguage, isAppLanguage, type AppLanguage } from "./i18n";
+
 // 应用设置：持久化到 localStorage。
 // - 外观：界面缩放（document zoom）、字体族、主题（CSS 变量 / data-theme）。
 // - 压缩：默认压缩等级、是否剔除系统垃圾文件。
@@ -10,6 +12,7 @@ export type AppearanceMode = "system" | "light" | "dark";
 export type WindowMaterial = "acrylic" | "mica" | "none";
 
 export interface Settings {
+  language: AppLanguage; // 界面语言：跟随系统 / 简体中文 / English
   scale: number; // 界面整体缩放（字体大小），1 = 100%
   font: string; // 字体族 key，见 FONTS
   theme: string; // 主题 key，见 THEMES
@@ -21,37 +24,28 @@ export interface Settings {
   openAfterExtract: boolean; // 解压完成后打开目标目录
 }
 
-// [key, 显示名]。深浅配色在 styles.css 里按 data-mode 与 prefers-color-scheme 切换。
-export const MODES: [AppearanceMode, string][] = [
-  ["system", "跟随系统"],
-  ["light", "浅色"],
-  ["dark", "深色"],
+// 显示名统一来自 i18n 资源；这里仅保留用于持久化和应用设置的稳定 key。
+export const MODES: AppearanceMode[] = ["system", "light", "dark"];
+
+export const MATERIALS: WindowMaterial[] = ["acrylic", "mica", "none"];
+
+// [key, CSS font-family]
+export const FONTS: [string, string][] = [
+  ["system", `-apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif`],
+  ["sans", `"Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif`],
+  ["serif", `Georgia, "Songti SC", "SimSun", "Times New Roman", serif`],
+  ["mono", `"SF Mono", "JetBrains Mono", Menlo, Consolas, "Courier New", monospace`],
 ];
 
-// [key, 显示名]。Windows 设置里以下拉菜单呈现；顺序即菜单顺序。
-export const MATERIALS: [WindowMaterial, string][] = [
-  ["acrylic", "亚克力"],
-  ["mica", "云母（Mica）"],
-  ["none", "无（普通）"],
-];
-
-export const FONTS: [string, string, string][] = [
-  // [key, 显示名, CSS font-family]
-  ["system", "系统默认", `-apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif`],
-  ["sans", "无衬线", `"Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif`],
-  ["serif", "衬线", `Georgia, "Songti SC", "SimSun", "Times New Roman", serif`],
-  ["mono", "等宽", `"SF Mono", "JetBrains Mono", Menlo, Consolas, "Courier New", monospace`],
-];
-
-// [key, 显示名, 代表色(用于设置里的色块预览)]。实际配色在 styles.css 的
+// [key, 代表色(用于设置里的色块预览)]。实际配色在 styles.css 的
 // :root[data-theme=...] 块中按浅色/深色分别定义。"default" 使用 Origami 品牌蓝紫。
-export const THEMES: [string, string, string][] = [
-  ["default", "折纸蓝", "#5b5fef"],
-  ["ocean", "海洋蓝", "#0ea5e9"],
-  ["forest", "森林绿", "#16a34a"],
-  ["grape", "葡萄紫", "#8b5cf6"],
-  ["rose", "玫瑰粉", "#ec4899"],
-  ["slate", "石墨灰", "#64748b"],
+export const THEMES: [string, string][] = [
+  ["default", "#5b5fef"],
+  ["ocean", "#0ea5e9"],
+  ["forest", "#16a34a"],
+  ["grape", "#8b5cf6"],
+  ["rose", "#ec4899"],
+  ["slate", "#64748b"],
 ];
 
 export const SCALE_MIN = 0.7;
@@ -63,7 +57,7 @@ export const SCALE_STEP = 0.1;
 export const ACRYLIC_OPACITY_MIN = 10;
 export const ACRYLIC_OPACITY_MAX = 95;
 
-const DEFAULTS: Settings = { scale: 1, font: "system", theme: "default", mode: "system", material: "acrylic", acrylicOpacity: 90, level: 6, excludeJunk: true, openAfterExtract: true };
+const DEFAULTS: Settings = { language: "system", scale: 1, font: "system", theme: "default", mode: "system", material: "acrylic", acrylicOpacity: 90, level: 6, excludeJunk: true, openAfterExtract: true };
 
 export function clampScale(s: number): number {
   return Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(s * 10) / 10));
@@ -79,7 +73,7 @@ function clampLevel(n: number): number {
 
 // 读取窗口材质，兼容旧版布尔 `effects`：true→默认亚克力，false→无。
 function readMaterial(raw: any): WindowMaterial {
-  if (MATERIALS.some((m) => m[0] === raw.material)) return raw.material;
+  if (MATERIALS.includes(raw.material)) return raw.material;
   if (typeof raw.effects === "boolean") return raw.effects ? DEFAULTS.material : "none";
   return DEFAULTS.material;
 }
@@ -88,10 +82,11 @@ export function loadSettings(): Settings {
   try {
     const raw = JSON.parse(localStorage.getItem("settings") ?? "{}");
     return {
+      language: isAppLanguage(raw.language) ? raw.language : DEFAULTS.language,
       scale: typeof raw.scale === "number" ? clampScale(raw.scale) : DEFAULTS.scale,
       font: FONTS.some((f) => f[0] === raw.font) ? raw.font : DEFAULTS.font,
       theme: THEMES.some((t) => t[0] === raw.theme) ? raw.theme : DEFAULTS.theme,
-      mode: MODES.some((m) => m[0] === raw.mode) ? raw.mode : DEFAULTS.mode,
+      mode: MODES.includes(raw.mode) ? raw.mode : DEFAULTS.mode,
       material: readMaterial(raw),
       acrylicOpacity:
         typeof raw.acrylicOpacity === "number" ? clampAcrylicOpacity(raw.acrylicOpacity) : DEFAULTS.acrylicOpacity,
@@ -111,9 +106,10 @@ export function saveSettings(s: Settings) {
 
 export function applySettings(s: Settings) {
   const root = document.documentElement;
+  void applyLanguage(s.language);
   // zoom 在 WebKit / WebView2 中均支持，可整体缩放含 px 布局的界面。
   root.style.setProperty("zoom", String(s.scale));
-  const fam = FONTS.find((f) => f[0] === s.font)?.[2] ?? FONTS[0][2];
+  const fam = FONTS.find((f) => f[0] === s.font)?.[1] ?? FONTS[0][1];
   root.style.setProperty("--font-family", fam);
   // 主题通过 data-theme 切换，配色在 CSS 里按浅/深色分别定义，避免覆盖暗色模式。
   if (s.theme && s.theme !== "default") {

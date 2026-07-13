@@ -1,24 +1,19 @@
 # Origami
 
-跨平台压缩包管理器，对标 Bandizip / 7-Zip 的日常体验。基于 **Tauri 2 + Rust + React/TypeScript** 构建，原生、轻量、启动快。
+Origami 是一款基于 **Tauri 2 + Rust + React/TypeScript** 的跨平台压缩包管理器，目标是提供接近 Bandizip / 7-Zip 的轻量日常体验。
 
 ## 功能
 
-- **浏览与解压**：树形浏览归档内容，支持解压全部 / 解压选中 / 单文件预览 / 用默认程序打开。
-- **创建与编辑**：压缩文件或文件夹，向已有归档增删条目，可选压缩等级、排除系统垃圾文件（`.DS_Store`、`__MACOSX` 等）。
-- **广泛的格式支持**：
+- **浏览与解压**：在应用内浏览文件系统和归档目录树，支持全部/选中解压、预览、默认程序打开和完整性校验。
+- **创建与编辑**：压缩文件或文件夹，向现有归档添加或删除条目，可设置压缩等级、密码、分卷和系统垃圾文件过滤。
+- **归档格式**：
   - 读写：`zip`（含 AES）、`7z`（含 AES-256）、`tar`、`gz`/`tgz`、`bz2`/`tbz2`、`xz`/`txz`、`zst`/`tzst`、`jar`、`apk`
   - 只读：`rar`
-- **加密归档**：自动识别加密项并按需提示输入密码。
-- **密码管理器**：保存常用归档密码，明文存于**系统凭据库**（macOS 钥匙串 / Windows 凭据管理器），本地仅留索引不落明文；查看明文前需通过**系统认证**（macOS Touch ID / 登录密码，Windows Hello）。
-- **文件关联管理**：一键把 Origami 设为各压缩格式的默认打开程序，并显示每种格式的当前处理器。
-- **右键菜单集成**：
-  - macOS：通过文件关联接入「打开方式」。
-  - Windows：应用内一键安装/移除经典右键菜单（注册表，无需打包签名）。
-- **编码识别**：对非 UTF-8 文件名自动探测编码（GBK 等），也可手动指定。
-- **快捷压缩**：从系统右键菜单直接压缩时弹出迷你进度窗口，无需打开主界面。
-- **可定制界面**：主题、字号、缩放等设置。
-- **快捷键**：`Cmd/Ctrl + ,` 打开设置；`Cmd/Ctrl + +/-` 调整界面字号，`Cmd/Ctrl + 0` 复位。修饰键按平台自适应（macOS 用 Cmd，Windows/Linux 用 Ctrl）。
+- **编码处理**：自动探测非 UTF-8 文件名编码，也可手动选择 GBK、Big5、Shift-JIS 等编码。
+- **密码保护**：明文密码保存到 macOS 钥匙串或 Windows 凭据管理器，本地 `passwords.json` 只保存索引；查看明文前使用 Touch ID / Windows Hello 等系统认证。
+- **系统集成**：管理文件关联；在 Finder / 资源管理器右键菜单中直接压缩或解压；快捷任务使用独立进度窗口。
+- **界面设置**：支持深浅模式、主题、字体、缩放和窗口材质。
+- **国际化基础**：语言可跟随系统，也可选择简体中文或 English；欢迎页、应用外壳、任务状态和设置页已接入 i18n，其余界面按相同资源结构继续迁移。
 
 ## 技术栈
 
@@ -27,78 +22,69 @@
 | 桌面框架 | Tauri 2 |
 | 后端 | Rust（`zip`、`sevenz-rust2`、`unrar`、`tar`、`flate2`、`bzip2`、`liblzma`、`zstd`） |
 | 前端 | React 18 + TypeScript + Vite 6 |
-| 系统认证 | macOS LocalAuthentication（objc2）/ Windows Hello（`windows` crate） |
+| 国际化 | i18next + react-i18next |
+| 系统认证 | macOS LocalAuthentication / Windows Hello |
 
 ## 开发
 
-前置：Node.js、Rust 工具链、Tauri 2 系统依赖。
+需要 Node.js、Rust 工具链和当前平台对应的 Tauri 2 系统依赖。
 
 ```bash
-npm install            # 安装前端依赖
-npm run tauri dev      # 启动开发模式（Vite + Rust 调试二进制）
-npm run tauri build    # 构建发行版 .app / .dmg（或对应平台产物）
+npm install
+npm run tauri dev
+npm run tauri build
 ```
 
-仅校验，不打包：
+提交改动前至少运行：
 
 ```bash
-npx tsc --noEmit                         # 前端类型检查
-cd src-tauri && cargo check              # 后端编译检查
+npx tsc --noEmit
+cd src-tauri && cargo check
 ```
+
+当前平台无法覆盖另一平台的 `#[cfg(...)]` 分支；涉及系统集成时，还需要在目标系统上做运行验证。Windows 需要 MSVC Rust 工具链、WebView2 Runtime 和包含 C++ 工作负载的 Visual Studio Build Tools。
 
 ## 项目结构
 
-```
-src/                      前端（React/TS）
-  App.tsx                 应用外壳、标题栏、归档打开/拖拽
+```text
+src/
+  App.tsx                 主窗口、归档任务和全局交互
+  main.tsx                主窗口 / 快捷进度窗 / 交互任务窗入口
+  i18n/                   语言解析与翻译资源
   components/
-    Browser.tsx           归档内容浏览器（列表、右键菜单、快捷键、属性）
-    dialogs.tsx           设置、密码管理器、文件关联、属性等弹窗
-    Welcome.tsx           欢迎页 / 最近打开
-    MiniProgress.tsx      快捷压缩的迷你进度窗口
-  api.ts                  对后端命令的封装
-  settings.ts             本地设置（localStorage）
+    Welcome.tsx           欢迎页与最近打开
+    FileExplorer.tsx      文件系统浏览
+    Browser.tsx           归档内容浏览与编辑
+    dialogs.tsx           设置、压缩、解压、密码等弹窗
+    MiniProgress.tsx      快捷任务进度窗口
+    AskDialog.tsx         需要用户配置的快捷任务窗口
+  api.ts                  Tauri 命令封装
+  settings.ts             持久化设置
 
-src-tauri/src/            后端（Rust）
-  archive/                list / extract / create / edit / preview
-  passwords.rs            密码存储（app_data_dir/passwords.json）
-  sysauth.rs              系统级身份验证（Touch ID / Windows Hello）
-  macassoc.rs             macOS 文件关联（LaunchServices）
-  winassoc.rs             Windows 文件关联（注册表）
-  winmenu.rs              Windows 经典右键菜单（注册表）
+src-tauri/src/
+  archive/                归档识别、列出、解压、创建、编辑和预览
+  cli.rs                  命令行与深链动作解析
+  services.rs             macOS Finder Quick Action
+  winmenu.rs              Windows 经典右键菜单
+  macassoc.rs/winassoc.rs 文件关联
+  sysauth.rs              Touch ID / Windows Hello
+  passwords.rs            系统凭据库与本地索引
   sysicon.rs              系统文件图标
-  encoding.rs             文件名编码探测
 
-windows-extension/        Win11 新版顶层右键菜单脚手架（IExplorerCommand，需签名打包）
+windows-extension/        Win11 新版顶层菜单（IExplorerCommand + 稀疏包）
+finder-extension/         macOS Finder 扩展相关代码
 ```
 
-## 平台说明
+## 国际化开发
 
-- **密码存储**：密码明文写入系统凭据库（钥匙串 / 凭据管理器），`app_data_dir/passwords.json` 只保存索引（id、备注、时间戳），不含明文；旧版明文文件首次启动时自动迁移。
-- **密码可见性**：密码管理器在展示明文前调用系统认证；无可用认证的平台直接放行（不阻断用户查看自己的密码）。
-- **Windows 右键菜单**：经典菜单（注册表）已接入主程序；Win11 新版顶层菜单需 MSIX/稀疏包签名注册，详见 [`windows-extension/README.md`](windows-extension/README.md)。
+- 翻译资源位于 `src/i18n/locales/`，按功能分组使用稳定的语义键，不把中文原文当作 key。
+- 新增用户可见文案时同时补齐 `zh-CN.ts` 与 `en-US.ts`；品牌名、文件路径、格式名和后端错误原文无需翻译。
+- 组件内使用 `useTranslation()`；非 React 代码可导入 `i18n` 实例。含数量或变量的文案通过插值生成，不在 JSX 中拼接句子。
+- `settings.language` 保存 `system`、`zh-CN` 或 `en-US`。`system` 会解析浏览器首选语言，暂不支持的语言回退到 English。
+- 完成一批迁移后，应分别切换中英文检查布局、按钮宽度、空状态和任务弹窗。
 
-## 在 Windows 上开发与验证
+## 平台集成
 
-开发主力机为 macOS，Windows 相关功能（注册表关联、右键菜单、Windows Hello）只能在 Windows 上真实运行验证。
-
-前置：Node.js、Rust（MSVC 工具链 `stable-x86_64-pc-windows-msvc`）、WebView2 Runtime、Visual Studio Build Tools（含 C++ 工作负载，liblzma/zstd 等 C 库依赖它编译）。
-
-```powershell
-npm install
-npx tsc --noEmit                  # 前端类型检查
-cd src-tauri; cargo check         # 后端编译（Windows 分支可真实编译）
-npm run tauri dev                 # 开发模式（Windows 无 macOS 的旧 app 抢前台问题，所见即当前代码）
-npm run tauri build               # 出 .msi / .exe
-```
-
-需在 Windows 上重点验证的功能（这些是 macOS 上只能编译保证、无法运行的 `#[cfg(windows)]` 分支）：
-
-| 功能 | 文件 | 验证步骤 |
-| --- | --- | --- |
-| 文件关联（写 HKCU 注册表） | `winassoc.rs` | 关联面板勾选某格式 → 资源管理器里该格式默认程序变为 Origami；取消勾选能还原 |
-| 经典右键菜单 | `winmenu.rs` | 右键菜单面板「安装」→ 文件上右键出现 Origami 项并能打开；「移除」后菜单项干净消失 |
-| Windows Hello 密码门控 | `sysauth.rs` | 打开密码管理器 → 弹出 Hello 验证；取消验证不显示明文；无 Hello 环境下不被锁死 |
-| 快捷键 | `App.tsx` | `Ctrl + ,` 开设置；`Ctrl + +/-` 调字号、`Ctrl + 0` 复位 |
-| 快捷压缩迷你窗 | — | 从右键菜单直接压缩时弹出迷你进度窗，无需打开主界面 |
-| Win11 新版顶层菜单 | `windows-extension/` | 跑 `windows-extension/build.ps1`，按其 README 完成 MSIX/稀疏包签名注册后验证 |
+- **macOS**：Finder Quick Action 可安装/移除压缩与解压动作。由于 LaunchServices 可能把同 bundle id 的已安装版本带到前台，本地 UI 验证以最新打包并安装的 `.app` 为准。
+- **Windows**：应用内可安装/移除基于 HKCU 的经典右键菜单；Win11 新版顶层菜单需要签名和稀疏包注册，见 [`windows-extension/README.md`](windows-extension/README.md)。
+- **密码存储**：旧版明文索引会在读取或写入入口迁移到系统凭据库；迁移成功后本地文件不再保留明文。

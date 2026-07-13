@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, Progress } from "../api";
@@ -11,11 +12,12 @@ import { loadSettings } from "../settings";
 // 主窗（visible:false）在部分平台（Windows WebView2）可能延迟创建 webview、不跑 JS，
 // 依赖它发起任务并不可靠。故把「取动作 → 压缩 → 收尾」整条链路放在这里，并显示进度。
 export function MiniProgress() {
+  const { t } = useTranslation();
   const [prog, setProg] = useState<Progress | null>(null);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 当前批次动词："压缩" / "解压"，用于标题与提示文案。
-  const [verb, setVerb] = useState("压缩");
+  // 当前批次动作使用稳定 key，显示文案交给 i18n。
+  const [verb, setVerb] = useState<"compress" | "extract">("compress");
   const jobRef = useRef<string | null>(null);
   const started = useRef(false);
 
@@ -72,7 +74,7 @@ export function MiniProgress() {
         return;
       }
       // 批次通常只含一种动作（右键菜单一次一项）；有解压则标题显示「解压」。
-      const label = extracts.length > 0 && creates.length === 0 ? "解压" : "压缩";
+      const label = extracts.length > 0 && creates.length === 0 ? "extract" : "compress";
       setVerb(label);
 
       let ok = true;
@@ -136,7 +138,7 @@ export function MiniProgress() {
         setDone(true);
         await new Promise((r) => setTimeout(r, 800));
       } else {
-        setError(lastErr || `${label}失败`);
+        setError(lastErr || t(`task.failed.${label}`));
         // 出错时多停留片刻让用户看到信息，随后由主窗接管报错。
         await new Promise((r) => setTimeout(r, 1800));
       }
@@ -150,12 +152,16 @@ export function MiniProgress() {
     <div className={`mini-progress task-progress ${error ? "has-error" : ""} ${done ? "is-done" : ""}`} data-tauri-drag-region>
       <div className="task-progress-head" data-tauri-drag-region>
         <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
-          <UiIcon name={done ? "verify" : verb === "解压" ? "extract" : "archive"} size={20} />
+          <UiIcon name={done ? "verify" : verb === "extract" ? "extract" : "archive"} size={20} />
         </span>
         <div className="task-progress-heading" data-tauri-drag-region>
-          <div className="modal-eyebrow">快捷任务</div>
+          <div className="modal-eyebrow">{t("task.quick")}</div>
           <div className="mini-title">
-            {error ? `${verb}失败` : done ? `${verb}完成` : `正在${verb}…`}
+            {error
+              ? t(`task.failed.${verb}`)
+              : done
+                ? t(`task.completed.${verb}`)
+                : t(`task.running.${verb}`)}
           </div>
         </div>
         <strong className="task-progress-percent">
@@ -172,19 +178,19 @@ export function MiniProgress() {
           {error
             ? error
             : done
-              ? "任务已完成"
+              ? t("task.finished")
               : prog
                 ? prog.total > 0
                   ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
                   : `${fmtSize(prog.current)} · ${prog.file}`
-                : "准备中…"}
+                : t("common.preparing")}
         </span>
         {!done && !error && (
           <button
             className="btn sm"
             onClick={() => jobRef.current && api.cancelJob(jobRef.current)}
           >
-            取消
+            {t("common.cancel")}
           </button>
         )}
       </div>

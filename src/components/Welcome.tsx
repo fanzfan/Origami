@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { UiIcon } from "../icons";
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function Welcome(p: Props) {
+  const { t } = useTranslation();
   return (
     <div className="welcome">
       <section className="welcome-card">
@@ -24,23 +26,23 @@ export function Welcome(p: Props) {
 
         <div className={`dropzone ${p.dragOver ? "over" : ""}`}>
           <UiIcon className="drop-icon" name="archive" size={28} />
-          <p>{p.loading ? "正在读取归档…" : "拖入压缩文件以打开，或拖入普通文件以压缩"}</p>
+          <p>{p.loading ? t("welcome.reading") : t("welcome.dropHint")}</p>
           <div className="actions">
             <button className="btn primary" onClick={p.onOpen} disabled={p.loading}>
               <UiIcon name="archive" />
-              打开归档…
+              {t("welcome.openArchive")}
             </button>
             <button className="btn secondary" onClick={p.onBrowse} disabled={p.loading}>
               <UiIcon name="folder-open" />
-              浏览文件…
+              {t("welcome.browseFiles")}
             </button>
             <button className="btn secondary" onClick={p.onCompressFiles} disabled={p.loading}>
               <UiIcon name="file-archive" />
-              压缩文件…
+              {t("welcome.compressFiles")}
             </button>
             <button className="btn secondary" onClick={p.onCompressFolder} disabled={p.loading}>
               <UiIcon name="folder-archive" />
-              压缩文件夹…
+              {t("welcome.compressFolder")}
             </button>
           </div>
         </div>
@@ -48,7 +50,7 @@ export function Welcome(p: Props) {
 
       {p.recent.length > 0 && (
         <div className="recent">
-          <h3>最近打开</h3>
+          <h3>{t("welcome.recent")}</h3>
           {p.recent.map((path) => (
             <button type="button" key={path} className="item" onClick={() => p.onOpenRecent(path)}>
               <UiIcon name="archive" size={17} />
