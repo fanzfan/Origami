@@ -431,13 +431,13 @@ export function SettingsDialog(p: {
       <div className="field">
         <label>{t("settings.themeLabel")}</label>
         <div className="theme-grid">
-          {THEMES.map(([key, color]) => (
+          {THEMES.map(([key, preview]) => (
             <div
               key={key}
               className={`theme-swatch ${s.theme === key ? "on" : ""}`}
               onClick={() => p.onChange({ theme: key })}
             >
-              <span className="dot" style={{ background: color }} />
+              <span className="dot" style={{ background: preview }} />
               {t(`settings.theme.${key}`)}
             </div>
           ))}

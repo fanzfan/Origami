@@ -37,15 +37,15 @@ export const FONTS: [string, string][] = [
   ["mono", `"SF Mono", "JetBrains Mono", Menlo, Consolas, "Courier New", monospace`],
 ];
 
-// [key, 代表色(用于设置里的色块预览)]。实际配色在 styles.css 的
+// [key, 渐变预览(用于设置里的色块)]。实际配色在 styles.css 的
 // :root[data-theme=...] 块中按浅色/深色分别定义。"default" 使用 Origami 品牌蓝紫。
 export const THEMES: [string, string][] = [
-  ["default", "#5b5fef"],
-  ["ocean", "#0ea5e9"],
-  ["forest", "#16a34a"],
-  ["grape", "#8b5cf6"],
-  ["rose", "#ec4899"],
-  ["slate", "#64748b"],
+  ["default", "linear-gradient(135deg, #5b5fef, #2f8df4)"],
+  ["ocean", "linear-gradient(135deg, #147d92, #78c6d3)"],
+  ["forest", "linear-gradient(135deg, #507b4d, #a6b96b)"],
+  ["grape", "linear-gradient(135deg, #875389, #d49aaa)"],
+  ["rose", "linear-gradient(135deg, #b85b6a, #e59c84)"],
+  ["slate", "linear-gradient(135deg, #5d7280, #b1bec4)"],
 ];
 
 export const SCALE_MIN = 0.7;
