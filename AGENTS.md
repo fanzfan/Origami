@@ -1,65 +1,65 @@
 # AGENTS.md
 
-面向在本仓库工作的 Codex 实例。Origami 是 Tauri 2 + Rust + React/TypeScript 的跨平台压缩包管理器。
+For Codex instances working in this repository. Origami is a cross-platform archive manager built with Tauri 2 + Rust + React/TypeScript.
 
-## 校验命令
+## Verification commands
 
-改动后务必跑通：
+Always run after changes:
 
 ```bash
 npx tsc --noEmit
 cd src-tauri && cargo check
 ```
 
-运行和构建：
+Run and build:
 
 ```bash
 npm run tauri dev
 npm run tauri build
 ```
 
-## 跨平台交付
+## Cross-platform delivery
 
-- 平台依赖放入 `[target.'cfg(...)'.dependencies]`，平台代码使用 `#[cfg(target_os = "...")]` 隔离。
-- `cargo check` 只覆盖当前目标；修改平台专属分支后，应在对应系统上补做编译与运行验证。不要把缺少目标平台 C 工具链导致的交叉编译失败当成业务代码错误。
-- Windows 环境需要 Rust MSVC 工具链、WebView2 Runtime、Visual Studio Build Tools（C++ 工作负载）。
-- macOS 的打包版与开发版 bundle id 相同。LaunchServices 若将 `/Applications/Origami.app` 带到前台，应以最新 `npm run tauri build` 产物覆盖安装后再验证。
+- Put platform-specific dependencies under `[target.'cfg(...)'.dependencies]`, and isolate platform code with `#[cfg(target_os = "...")]`.
+- `cargo check` only covers the current target; after modifying a platform-specific branch, do a compile and runtime check on that platform too. Don't mistake a cross-compilation failure caused by a missing target C toolchain for an application bug.
+- Windows requires the Rust MSVC toolchain, WebView2 Runtime, and Visual Studio Build Tools (with the C++ workload).
+- On macOS, the packaged build and the dev build share the same bundle id. If LaunchServices brings `/Applications/Origami.app` to the foreground, reinstall with the latest `npm run tauri build` output before verifying.
 
-涉及 Windows 分支时重点验证：
+When touching Windows-specific branches, verify in particular:
 
-- `winassoc.rs`：勾选/取消文件关联后，资源管理器默认程序正确变更和还原。
-- `winmenu.rs`：经典右键菜单安装后可启动 Origami，移除后注册表项消失。
-- `sysauth.rs`：Windows Hello 成功、取消和不可用三条路径都不会泄露明文或锁死用户。
-- `passwords.rs`：`passwords.json` 仅含 id、备注和时间戳；凭据 service 为 `dev.vela.origami.passwords`；删除时同步删除凭据。
-- `App.tsx`：`Ctrl + ,` 与 `Ctrl + +/-/0` 正常。
-- `windows-extension/`：按 README 构建、签名和注册后验证 Win11 新版顶层菜单。
+- `winassoc.rs`: toggling file associations correctly changes and restores Explorer's default program.
+- `winmenu.rs`: after installing the classic context menu, Origami launches correctly; after removal, the registry entries are gone.
+- `sysauth.rs`: the success, cancel, and unavailable paths for Windows Hello never leak plaintext or lock the user out.
+- `passwords.rs`: `passwords.json` only contains id, note, and timestamp; the credential service is `dev.vela.origami.passwords`; deleting an entry also deletes the credential.
+- `App.tsx`: `Ctrl + ,` and `Ctrl + +/-/0` work correctly.
+- `windows-extension/`: after building, signing, and registering per the README, verify the Win11 new top-level menu.
 
-涉及 macOS 分支时重点验证：
+When touching macOS-specific branches, verify in particular:
 
-- `macassoc.rs`：文件关联写入、取消和回退处理器正确。
-- `services.rs`：Finder Quick Action 安装/移除、压缩/解压深链与目标路径正确。
-- `sysauth.rs` / `passwords.rs`：系统认证与钥匙串读写、迁移、删除正常。
-- `Cmd + ,` 与 `Cmd + +/-/0` 正常。
+- `macassoc.rs`: file association writes, cancellation, and fallback handler behavior are correct.
+- `services.rs`: Finder Quick Action install/remove, and compress/extract deep links with correct target paths.
+- `sysauth.rs` / `passwords.rs`: system authentication and Keychain read/write, migration, and deletion all work.
+- `Cmd + ,` and `Cmd + +/-/0` work correctly.
 
-## 架构
+## Architecture
 
-- **命令注册**：后端命令在 `src-tauri/src/lib.rs` 定义并在 `tauri::generate_handler!` 注册；前端在 `src/api.ts` 封装。三处必须一致。
-- **平台分发**：跨平台命令在 `lib.rs` 暴露统一接口，再按 `#[cfg]` 分发到平台模块；不支持的平台返回安全默认值。
-- **窗口显隐**：主窗口初始 `visible: false`，前端挂载后调用 `frontend_ready`；无需交互的快捷任务由 `mini` 窗口驱动，需要设置的任务由 `ask` 窗口驱动。
-- **重活异步化**：解压、压缩等阻塞任务使用 `spawn_blocking`，通过 job、进度事件和取消命令与前端协作。
-- **密码门控**：展示明文前先调用 `system_auth`；认证不可用时放行，认证失败或用户取消时不显示，认证机制异常时不能把用户锁死。
-- **密码存储**：明文只写入系统凭据库；`passwords.json` 只保存索引。旧版明文在加载和写入入口自动迁移。
+- **Command registration**: backend commands are defined in `src-tauri/src/lib.rs` and registered in `tauri::generate_handler!`; the frontend wraps them in `src/api.ts`. All three must stay in sync.
+- **Platform dispatch**: cross-platform commands expose a unified interface in `lib.rs`, then dispatch to platform modules via `#[cfg]`; unsupported platforms return safe defaults.
+- **Window visibility**: the main window starts with `visible: false` and calls `frontend_ready` once the frontend has mounted; quick tasks that need no interaction are driven by the `mini` window, and tasks that need configuration are driven by the `ask` window.
+- **Async for heavy work**: blocking tasks like extraction and compression use `spawn_blocking`, coordinating with the frontend through jobs, progress events, and cancel commands.
+- **Password gating**: call `system_auth` before revealing plaintext; if authentication is unavailable, allow through; if it fails or the user cancels, don't show it; if the authentication mechanism misbehaves, never lock the user out.
+- **Password storage**: plaintext is only ever written to the system credential store; `passwords.json` only stores an index. Legacy plaintext is migrated automatically on load and write.
 
-## 国际化
+## Internationalization
 
-- 注释和开发文档使用中文；用户可见文案必须通过 `src/i18n/locales/` 的资源键提供，不再直接写死中文。
-- 当前支持 `zh-CN` 与 `en-US`，语言偏好还包含 `system`。新增语言时同步扩展资源、语言类型和设置选项。
-- 使用稳定的语义 key 与 i18next 插值/复数能力，不以中文原文为 key，不在 JSX 中拼接可翻译句子。
-- 每次迁移文案同时维护中英文；允许分批迁移旧界面，但同一功能区应完整迁移，避免一个弹窗内中英混杂。
+- Comments and developer docs are in Chinese; user-facing text must come from resource keys in `src/i18n/locales/` rather than being hardcoded.
+- Currently supports `zh-CN` and `en-US`, with `system` as an additional language preference. When adding a new language, extend the resources, the language type, and the settings option together.
+- Use stable semantic keys with i18next interpolation/pluralization; don't use the Chinese source text as the key, and don't concatenate translatable sentences in JSX.
+- When migrating text, maintain both Chinese and English together; migrating legacy UI in batches is fine, but a given feature area should be migrated completely — avoid mixing Chinese and English within a single dialog.
 
-## 代码约定
+## Code conventions
 
-- 遵循现有代码风格，优先编辑既有文件；只有资源、平台模块或职责明确时才新建文件。
-- 单文件“用默认程序打开”走 `extract_entry_to_temp` 解压到 `app_cache_dir`，再交给 opener。
-- 快捷键修饰键按平台自适应：macOS 使用 `metaKey`，Windows/Linux 使用 `ctrlKey`。
-- 保留并尊重工作区已有改动，不覆盖与当前任务无关的内容。
+- Follow the existing code style and prefer editing existing files; only create new files for resources, platform modules, or when responsibilities are clearly separated.
+- "Open with default program" for a single file goes through `extract_entry_to_temp` to extract into `app_cache_dir`, then hands off to the opener.
+- Shortcut modifier keys adapt per platform: macOS uses `metaKey`, Windows/Linux use `ctrlKey`.
+- Preserve and respect existing changes in the workspace; don't overwrite content unrelated to the current task.

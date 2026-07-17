@@ -1,33 +1,33 @@
 # Origami
 
-Origami 是一款基于 **Tauri 2 + Rust + React/TypeScript** 的跨平台压缩包管理器，目标是提供接近 Bandizip / 7-Zip 的轻量日常体验。
+Origami is a cross-platform archive manager built with **Tauri 2 + Rust + React/TypeScript**, aiming for a lightweight daily-use experience close to Bandizip / 7-Zip.
 
-## 功能
+## Features
 
-- **浏览与解压**：在应用内浏览文件系统和归档目录树，支持全部/选中解压、预览、默认程序打开和完整性校验。
-- **创建与编辑**：压缩文件或文件夹，向现有归档添加或删除条目，可设置压缩等级、密码、分卷和系统垃圾文件过滤。
-- **归档格式**：
-  - 读写：`zip`（含 AES）、`7z`（含 AES-256）、`tar`、`gz`/`tgz`、`bz2`/`tbz2`、`xz`/`txz`、`zst`/`tzst`、`jar`、`apk`
-  - 只读：`rar`
-- **编码处理**：自动探测非 UTF-8 文件名编码，也可手动选择 GBK、Big5、Shift-JIS 等编码。
-- **密码保护**：明文密码保存到 macOS 钥匙串或 Windows 凭据管理器，本地 `passwords.json` 只保存索引；查看明文前使用 Touch ID / Windows Hello 等系统认证。
-- **系统集成**：管理文件关联；在 Finder / 资源管理器右键菜单中直接压缩或解压；快捷任务使用独立进度窗口。
-- **界面设置**：支持深浅模式、主题、字体、缩放和窗口材质。
-- **国际化基础**：语言可跟随系统，也可选择简体中文或 English；欢迎页、应用外壳、任务状态和设置页已接入 i18n，其余界面按相同资源结构继续迁移。
+- **Browse & extract**: browse the file system and archive directory trees within the app, with support for extract-all/extract-selected, preview, opening with the default program, and integrity verification.
+- **Create & edit**: compress files or folders, add or remove entries from existing archives, with configurable compression level, password, split volumes, and system junk-file filtering.
+- **Archive formats**:
+  - Read/write: `zip` (with AES), `7z` (with AES-256), `tar`, `gz`/`tgz`, `bz2`/`tbz2`, `xz`/`txz`, `zst`/`tzst`, `jar`, `apk`
+  - Read-only: `rar`
+- **Encoding handling**: automatically detects non-UTF-8 filename encodings, or you can manually choose GBK, Big5, Shift-JIS, and others.
+- **Password protection**: plaintext passwords are saved to the macOS Keychain or Windows Credential Manager; the local `passwords.json` only stores an index. Viewing plaintext requires system authentication such as Touch ID or Windows Hello.
+- **System integration**: manage file associations; compress or extract directly from the Finder / Explorer right-click menu; quick tasks use a dedicated progress window.
+- **UI settings**: supports light/dark mode, themes, fonts, zoom, and window materials.
+- **Internationalization foundation**: language can follow the system, or be manually set to Simplified Chinese or English; the welcome page, app shell, task status, and settings page are wired up for i18n, with the rest of the UI being migrated to the same resource structure.
 
-## 技术栈
+## Tech stack
 
-| 层 | 技术 |
+| Layer | Technology |
 | --- | --- |
-| 桌面框架 | Tauri 2 |
-| 后端 | Rust（`zip`、`sevenz-rust2`、`unrar`、`tar`、`flate2`、`bzip2`、`liblzma`、`zstd`） |
-| 前端 | React 18 + TypeScript + Vite 6 |
-| 国际化 | i18next + react-i18next |
-| 系统认证 | macOS LocalAuthentication / Windows Hello |
+| Desktop framework | Tauri 2 |
+| Backend | Rust (`zip`, `sevenz-rust2`, `unrar`, `tar`, `flate2`, `bzip2`, `liblzma`, `zstd`) |
+| Frontend | React 18 + TypeScript + Vite 6 |
+| Internationalization | i18next + react-i18next |
+| System authentication | macOS LocalAuthentication / Windows Hello |
 
-## 开发
+## Development
 
-需要 Node.js、Rust 工具链和当前平台对应的 Tauri 2 系统依赖。
+Requires Node.js, the Rust toolchain, and the Tauri 2 system dependencies for your current platform.
 
 ```bash
 npm install
@@ -35,56 +35,56 @@ npm run tauri dev
 npm run tauri build
 ```
 
-提交改动前至少运行：
+Before committing changes, run at least:
 
 ```bash
 npx tsc --noEmit
 cd src-tauri && cargo check
 ```
 
-当前平台无法覆盖另一平台的 `#[cfg(...)]` 分支；涉及系统集成时，还需要在目标系统上做运行验证。Windows 需要 MSVC Rust 工具链、WebView2 Runtime 和包含 C++ 工作负载的 Visual Studio Build Tools。
+The current platform can't cover the `#[cfg(...)]` branches of the other platform; for changes touching system integration, you also need to do runtime verification on the target system. Windows requires the MSVC Rust toolchain, the WebView2 Runtime, and Visual Studio Build Tools with the C++ workload.
 
-## 项目结构
+## Project structure
 
 ```text
 src/
-  App.tsx                 主窗口、归档任务和全局交互
-  main.tsx                主窗口 / 快捷进度窗 / 交互任务窗入口
-  i18n/                   语言解析与翻译资源
+  App.tsx                 Main window, archive tasks, and global interactions
+  main.tsx                Entry points for main window / quick progress window / interactive task window
+  i18n/                   Language resolution and translation resources
   components/
-    Welcome.tsx           欢迎页与最近打开
-    FileExplorer.tsx      文件系统浏览
-    Browser.tsx           归档内容浏览与编辑
-    dialogs.tsx           设置、压缩、解压、密码等弹窗
-    MiniProgress.tsx      快捷任务进度窗口
-    AskDialog.tsx         需要用户配置的快捷任务窗口
-  api.ts                  Tauri 命令封装
-  settings.ts             持久化设置
+    Welcome.tsx           Welcome page and recently opened
+    FileExplorer.tsx      File system browsing
+    Browser.tsx           Archive content browsing and editing
+    dialogs.tsx           Settings, compress, extract, password, and other dialogs
+    MiniProgress.tsx      Quick task progress window
+    AskDialog.tsx         Quick task window requiring user configuration
+  api.ts                  Tauri command wrappers
+  settings.ts             Persisted settings
 
 src-tauri/src/
-  archive/                归档识别、列出、解压、创建、编辑和预览
-  cli.rs                  命令行与深链动作解析
+  archive/                Archive detection, listing, extraction, creation, editing, and preview
+  cli.rs                  Command-line and deep-link action parsing
   services.rs             macOS Finder Quick Action
-  winmenu.rs              Windows 经典右键菜单
-  macassoc.rs/winassoc.rs 文件关联
+  winmenu.rs              Windows classic right-click menu
+  macassoc.rs/winassoc.rs File associations
   sysauth.rs              Touch ID / Windows Hello
-  passwords.rs            系统凭据库与本地索引
-  sysicon.rs              系统文件图标
+  passwords.rs            System credential store and local index
+  sysicon.rs              System file icons
 
-windows-extension/        Win11 新版顶层菜单（IExplorerCommand + 稀疏包）
-finder-extension/         macOS Finder 扩展相关代码
+windows-extension/        Win11 new top-level menu (IExplorerCommand + sparse package)
+finder-extension/         macOS Finder extension code
 ```
 
-## 国际化开发
+## Internationalization development
 
-- 翻译资源位于 `src/i18n/locales/`，按功能分组使用稳定的语义键，不把中文原文当作 key。
-- 新增用户可见文案时同时补齐 `zh-CN.ts` 与 `en-US.ts`；品牌名、文件路径、格式名和后端错误原文无需翻译。
-- 组件内使用 `useTranslation()`；非 React 代码可导入 `i18n` 实例。含数量或变量的文案通过插值生成，不在 JSX 中拼接句子。
-- `settings.language` 保存 `system`、`zh-CN` 或 `en-US`。`system` 会解析浏览器首选语言，暂不支持的语言回退到 English。
-- 完成一批迁移后，应分别切换中英文检查布局、按钮宽度、空状态和任务弹窗。
+- Translation resources live in `src/i18n/locales/`, grouped by feature with stable semantic keys — don't use the Chinese source text as the key.
+- When adding new user-facing text, update both `zh-CN.ts` and `en-US.ts` together; brand names, file paths, format names, and raw backend error text don't need translation.
+- Use `useTranslation()` inside components; non-React code can import the `i18n` instance directly. Text with counts or variables should be generated via interpolation, not by concatenating sentences in JSX.
+- `settings.language` stores `system`, `zh-CN`, or `en-US`. `system` resolves the browser's preferred language, and currently unsupported languages fall back to English.
+- After completing a batch of migration, check layout, button widths, empty states, and task dialogs in both Chinese and English.
 
-## 平台集成
+## Platform integration
 
-- **macOS**：Finder Quick Action 可安装/移除压缩与解压动作。由于 LaunchServices 可能把同 bundle id 的已安装版本带到前台，本地 UI 验证以最新打包并安装的 `.app` 为准。
-- **Windows**：应用内可安装/移除基于 HKCU 的经典右键菜单；Win11 新版顶层菜单需要签名和稀疏包注册，见 [`windows-extension/README.md`](windows-extension/README.md)。
-- **密码存储**：旧版明文索引会在读取或写入入口迁移到系统凭据库；迁移成功后本地文件不再保留明文。
+- **macOS**: the Finder Quick Action can be installed/removed to add compress and extract actions. Since LaunchServices may bring an already-installed version with the same bundle id to the foreground, local UI verification should always be done against the most recently built and installed `.app`.
+- **Windows**: the app can install/remove an HKCU-based classic right-click menu; the Win11 new top-level menu requires signing and sparse package registration — see [`windows-extension/README.md`](windows-extension/README.md).
+- **Password storage**: legacy plaintext indexes are migrated to the system credential store on read or write; after a successful migration, the local file no longer retains plaintext.

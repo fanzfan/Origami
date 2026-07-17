@@ -1,50 +1,59 @@
-# Origami Windows 右键菜单
+# Origami Windows Context Menu
 
-Windows 上有两条右键菜单路径，对应两种菜单形态：
+Windows has two right-click menu paths, corresponding to two menu forms:
 
-| 形态 | 实现 | 状态 | 备注 |
+| Form | Implementation | Status | Notes |
 | --- | --- | --- | --- |
-| **经典菜单**（Win11「显示更多选项 / Shift+F10」；Win10 直接顶层） | 注册表 `HKCU\Software\Classes`（`src-tauri/src/winmenu.rs`） | **已接入主程序** | 应用内「🧩 右键菜单集成」一键安装/移除，无需签名打包 |
-| **Win11 新版顶层菜单** | 本目录的 IExplorerCommand COM 处理器 + MSIX 稀疏包 | **可开发注册，待发行签名** | 必须签名并注册稀疏包 |
+| **Classic menu** (Win11 "Show more options" / Shift+F10; direct top-level on Win10) | Registry `HKCU\Software\Classes` (`src-tauri/src/winmenu.rs`) | **Wired into the main app** | One-click install/remove via the app's "Context Menu Integration", no signed package needed |
+| **Win11 new top-level menu** | IExplorerCommand COM handler + MSIX sparse package in this directory | **Can be developed and registered, pending release signing** | Must be signed and the sparse package registered |
 
-经典菜单已经够日常使用；本目录是想进一步进入 Win11「新版顶层菜单」时的实现。
+The classic menu is already good enough for daily use; this directory is the implementation for going further into the Win11 "new top-level menu".
 
-## 为什么顶层新菜单需要打包
+## Why the new top-level menu requires packaging
 
-Win11 的新版右键菜单**只**接受打包应用（MSIX/稀疏包）提供的 `IExplorerCommand`
-处理器，且包必须经过签名、证书被本机信任。这与 macOS 顶层 Finder 扩展必须
-Developer ID + 公证是同一类平台限制。未打包的 Tauri 应用只能写经典注册表菜单。
+Win11's new right-click menu **only** accepts an `IExplorerCommand` handler provided by a
+packaged app (MSIX/sparse package), and the package must be signed with a certificate
+trusted by the machine. This is the same kind of platform restriction as macOS requiring
+Developer ID + notarization for a top-level Finder extension. An unpackaged Tauri app can
+only write to the classic registry menu.
 
-## 目录内容
+## Directory contents
 
-- `explorer-command/` — 进程内 COM 服务器（cdylib），实现五个平铺顶层命令：
-  ZIP、7Z、详细压缩、智能解压和选择位置解压。Invoke 时启动同目录
-  `Origami.exe --compress=<zip|7z|ask>` 或 `--extract=<smart|ask>`。
-- `AppxManifest.xml` — 稀疏包清单：声明 COM 服务器 + 挂到
-  `windows.fileExplorerContextMenus`。
-- `build.ps1` — 在 Windows 上编译 DLL、自签名、以 ExternalLocation 方式注册（开发用）。
+- `explorer-command/` — an in-process COM server (cdylib) implementing five pinned
+  top-level commands: ZIP, 7Z, detailed compress, smart extract, and extract-to-location.
+  On invoke, it launches `Origami.exe --compress=<zip|7z|ask>` or `--extract=<smart|ask>`
+  from the same directory.
+- `AppxManifest.xml` — the sparse package manifest: declares the COM server and hooks it
+  into `windows.fileExplorerContextMenus`.
+- `build.ps1` — builds the DLL on Windows, self-signs it, and registers it via
+  ExternalLocation (for development).
 
-## 开发启用步骤（Windows）
+## Development setup steps (Windows)
 
-1. 安装 Origami，记下安装目录（含 `Origami.exe`）。
-2. 打开「开发人员模式」（设置 › 隐私和安全性 › 开发者选项）。
-3. 运行：
+1. Install Origami and note its install directory (containing `Origami.exe`).
+2. Turn on "Developer Mode" (Settings › Privacy & security › For developers).
+3. Run:
    ```powershell
    cd windows-extension
    ./build.ps1 -AppDir "C:\Program Files\Origami"
    ```
-4. 重启资源管理器：`Stop-Process -Name explorer -Force; Start-Process explorer`
-5. 右键文件/文件夹 → 顶层出现三个压缩命令；右键受支持的归档时还会出现两个解压命令。
+4. Restart Explorer: `Stop-Process -Name explorer -Force; Start-Process explorer`
+5. Right-click a file/folder → three compress commands appear at the top level; right-click a supported archive and two extract commands also appear.
 
-卸载：`Get-AppxPackage *Origami.ShellExtension* | Remove-AppxPackage`
+Uninstall: `Get-AppxPackage *Origami.ShellExtension* | Remove-AppxPackage`
 
-## 注意
+## Notes
 
-- COM 代码按 `windows` crate 0.58 接口编写，**已在 Windows 上 `cargo build --release` 编译通过**
-  （需 `windows` 的 `implement` 特性；0.58 里 `IExplorerCommand` 等方法的 shell 项参数为
-  `Option<&IShellItemArray>`、`IClassFactory::CreateInstance` 的 outer 为 `Option<&IUnknown>`、
-  `IEnumExplorerCommand::Skip/Reset` 返回 `Result<()>`）。换 crate 版本时这些签名可能再次需要微调。
-  运行期行为（顶层菜单真正出现并能拉起 Origami.exe）仍需在设备上注册后验证。
-- `AppxManifest.xml` 的 `<Identity Publisher=...>` 必须与签名证书 Subject 完全一致。
-- `CLSID` 在 `explorer-command/src/lib.rs` 与 `AppxManifest.xml` 两处必须一致。
-- 分发给他人需用受信任的 Authenticode 证书重新签名，不能用自签名。
+- The COM code is written against the `windows` crate 0.58 interface, and **already builds
+  successfully on Windows with `cargo build --release`** (requires the `implement` feature
+  of `windows`; in 0.58 the shell item parameters of methods like `IExplorerCommand` are
+  `Option<&IShellItemArray>`, the outer parameter of `IClassFactory::CreateInstance` is
+  `Option<&IUnknown>`, and `IEnumExplorerCommand::Skip`/`Reset` return `Result<()>`). These
+  signatures may need tweaking again when changing crate versions. Runtime behavior (the
+  top-level menu actually appearing and correctly launching Origami.exe) still needs to be
+  verified on a device after registration.
+- The `<Identity Publisher=...>` in `AppxManifest.xml` must exactly match the signing
+  certificate's Subject.
+- The `CLSID` must match between `explorer-command/src/lib.rs` and `AppxManifest.xml`.
+- Distributing to others requires re-signing with a trusted Authenticode certificate — a
+  self-signed certificate won't work.

@@ -1,3 +1,3 @@
-# Claude Code 项目指引
+# Claude Code Project Guide
 
-本仓库统一使用 [`AGENTS.md`](AGENTS.md) 作为开发、架构、跨平台和校验规范。开始工作前请先阅读该文件，避免两份规则重复维护后再次产生偏差。
+This repository uses [`AGENTS.md`](AGENTS.md) as the single source of truth for development, architecture, cross-platform, and verification rules. Read that file before starting work to avoid maintaining two diverging sets of rules.
