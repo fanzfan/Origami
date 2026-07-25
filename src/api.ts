@@ -162,6 +162,10 @@ export const api = {
   setAcrylic: (enabled: boolean, r: number, g: number, b: number, alpha: number) =>
     invoke<void>("set_acrylic", { enabled, r, g, b, alpha }),
 
+  // 把当前窗口的 Win11 系统描边染成给定颜色并保持圆角（仅 Windows 生效）。
+  setWindowBorderColor: (r: number, g: number, b: number) =>
+    invoke<void>("set_window_border_color", { r, g, b }),
+
   fileAssocSupported: () => invoke<boolean>("file_assoc_supported"),
   fileAssocList: () => invoke<AssocEntry[]>("file_assoc_list"),
   fileAssocSet: (exts: string[], associate: boolean) =>

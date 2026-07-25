@@ -723,6 +723,31 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
 [data-window="ask"] .modal .body { flex: 1; min-height: 0; }
 [data-window="ask"] .modal-header { -webkit-app-region: drag; }
 
+/* Windows：卡片铺满整窗、直角、不描边不投影——圆角与描边全部交给 DWM（系统圆角是干净的，
+   前端在透明窗上自绘会出毛刺；描边由 main.tsx 调 set_window_border_color 染成卡片底色而隐形）。
+   卡片原来那样留白+描边时，不透明窗口的留白处透出的是网页底色，看着就是多出一层「怪边框」。
+   卡片圆角须为 0：否则卡片自己的弯角与 DWM 的裁切之间会露出一小块底色。
+   macOS 仍是透明窗 + 浮起卡片，不受影响。 */
+:root[data-platform="windows"][data-window="ask"] body { background: var(--bg-elev); }
+[data-platform="windows"][data-window="ask"] .overlay { padding: 0; }
+[data-platform="windows"][data-window="ask"] .modal {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-elev);
+}
+[data-platform="windows"][data-window="ask"] .mini-progress {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    radial-gradient(circle at 90% -30%, color-mix(in srgb, var(--accent-alt) 14%, transparent), transparent 52%),
+    var(--bg-elev);
+}
+
 /* ---------- settings ---------- */
 .settings-section { font-size: 12px; color: var(--text-dim); font-weight: 600; margin: 8px 0 -3px; }
 .settings-section:first-child { margin-top: 0; }

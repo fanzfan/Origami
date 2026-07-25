@@ -212,6 +212,8 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
             (520.0, 620.0)
         }
     };
+    // Windows 上卡片铺满整窗、圆角与描边都交给 DWM（前端启动时调 set_window_border_color
+    // 把描边染成卡片底色，见 winmat::apply_rounded_frame），故窗口保持不透明。
     tauri::WebviewWindowBuilder::new(
         app,
         "ask",
@@ -768,6 +770,24 @@ fn set_acrylic(
     Ok(())
 }
 
+/// 把**调用方窗口**的 Win11 系统描边染成 `(r,g,b)`，同时确保圆角（见
+/// `winmat::apply_rounded_frame`）。由铺满整窗的 ask 小窗在启动时按卡片底色调用，
+/// 使那圈描边与卡片同色、看不出来。非 Windows 平台为安全空操作。
+#[tauri::command]
+fn set_window_border_color(
+    #[allow(unused_variables)] window: tauri::Window,
+    #[allow(unused_variables)] r: u8,
+    #[allow(unused_variables)] g: u8,
+    #[allow(unused_variables)] b: u8,
+) -> CmdResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        winmat::apply_rounded_frame(hwnd.0 as isize, r, g, b);
+    }
+    Ok(())
+}
+
 // ---------------- 文件关联管理 ----------------
 
 /// 可由本应用接管的压缩包扩展名（与 tauri.conf.json 的 fileAssociations 对齐）。
@@ -1187,6 +1207,7 @@ pub fn run() {
             shell_menu_installed,
             app_platform,
             set_acrylic,
+            set_window_border_color,
             file_assoc_supported,
             file_assoc_list,
             file_assoc_set,
