@@ -214,7 +214,9 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     };
     // Windows 上卡片铺满整窗、圆角与描边都交给 DWM（前端启动时调 set_window_border_color
     // 把描边染成卡片底色，见 winmat::apply_rounded_frame），故窗口保持不透明。
-    tauri::WebviewWindowBuilder::new(
+    // 隐藏创建：Windows 上无装饰裸窗在 WebView2 首帧前会涂黑（黑闪），
+    // 故与主窗同款模式——前端渲染完首帧后再显示。
+    let win = tauri::WebviewWindowBuilder::new(
         app,
         "ask",
         tauri::WebviewUrl::App("index.html?ask=1".into()),
@@ -225,10 +227,19 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     .resizable(true)
     .decorations(false)
     .transparent(cfg!(target_os = "macos"))
+    .visible(false)
     .center()
     .build()
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // 兜底：若前端异常（WebView2 延迟初始化 / JS 未跑），2 秒后强制显示，保证窗口不会永远不出现。
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if !win.is_visible().unwrap_or(true) {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    });
+    Ok(())
 }
 
 type CmdResult<T> = Result<T, String>;
