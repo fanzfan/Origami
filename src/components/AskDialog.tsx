@@ -21,6 +21,20 @@ export function AskDialog() {
   const jobRef = useRef<string | null>(null);
   const started = useRef(false);
   const resizeSeq = useRef(0);
+  const shown = useRef(false);
+
+  // 小窗以 visible:false 创建（避免 Windows 上 WebView2 首帧前的黑闪），
+  // 首次布局并调好尺寸后、等首帧真正绘制出来再显示窗口。
+  const showWindowOnce = useCallback((win: ReturnType<typeof getCurrentWindow>) => {
+    if (shown.current) return;
+    shown.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
+        await win.show();
+        await win.setFocus();
+      });
+    });
+  }, []);
 
   const isAsk = (a: PendingAction) =>
     (a.kind === "create" && a.format === "ask") || (a.kind === "extract" && a.mode === "ask");
@@ -49,10 +63,11 @@ export function AskDialog() {
         if (isStale()) return;
         const cw = Math.round(cur.width / factor);
         const ch = Math.round(cur.height / factor);
-        if (Math.abs(cw - tw) <= 1 && Math.abs(ch - th) <= 1) return; // 已是目标尺寸，跳过
-        await win.setSize(new LogicalSize(tw, th));
-        if (isStale()) return;
-        await win.center();
+        if (Math.abs(cw - tw) > 1 || Math.abs(ch - th) > 1) {
+          await win.setSize(new LogicalSize(tw, th));
+          if (isStale()) return;
+          await win.center();
+        }
       } catch {
         if (isStale()) return;
         // 兜底：拿不到当前尺寸时直接精调一次。
@@ -60,11 +75,12 @@ export function AskDialog() {
         if (isStale()) return;
         await win.center();
       }
+      showWindowOnce(win);
     })();
     return () => {
       cancelled = true;
     };
-  }, [busy, currentKind]);
+  }, [busy, currentKind, showWindowOnce]);
 
   // 进度事件 → 更新进度条。
   useEffect(() => {
