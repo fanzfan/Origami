@@ -337,6 +337,35 @@ input[type="checkbox"] { accent-color: var(--accent); }
   color: var(--accent-text);
 }
 .dropzone strong { font-weight: 600; }
+
+/* 拖入提示浮层：压缩包 / 文件系统视图没有常驻拖放区，拖动经过时临时盖一层。 */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  pointer-events: none; /* 系统级拖放，浮层不能吃掉事件 */
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 80%;
+  padding: 26px 34px;
+  border: 2px dashed var(--accent);
+  border-radius: 15px;
+  background: var(--bg-elev);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+  color: var(--accent-text);
+  text-align: center;
+}
+.drop-overlay-card p { margin: 0; font-weight: 600; color: var(--text); }
 .welcome .actions { display: flex; justify-content: center; gap: 9px; flex-wrap: wrap; }
 .recent {
   width: min(680px, 90vw);

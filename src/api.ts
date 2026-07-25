@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 export interface Entry {
@@ -117,6 +117,28 @@ export const api = {
   extractEntryToTemp: (p: { path: string; entry: string; password?: string; encoding?: string }) =>
     invoke<string>("extract_entry_to_temp", { ...p }),
 
+  // 拖出前把选中条目解压到缓存暂存区，返回可交给系统拖放的绝对路径。
+  stageEntriesForDrag: (p: {
+    jobId: string;
+    path: string;
+    entries: string[];
+    password?: string;
+    encoding?: string;
+  }) => invoke<string[]>("stage_entries_for_drag", { ...p }),
+
+  // 发起系统原生文件拖放（tauri-plugin-drag）。resolve 时拖放已结束，返回落点结果。
+  // 注意：原生拖放要求发起的一刻鼠标左键仍按着——若之前的准备工作耗时过久，用户
+  // 多半已经松手，系统会立刻以 "Cancel" 收场。
+  startNativeDrag: async (paths: string[], image: string): Promise<DragResult> => {
+    let result: DragResult = "Cancel";
+    const onEvent = new Channel<{ result: DragResult }>();
+    onEvent.onmessage = (m) => {
+      result = m.result;
+    };
+    await invoke<void>("plugin:drag|start_drag", { item: paths, image, onEvent });
+    return result;
+  },
+
   defaultExtractDir: (path: string) => invoke<string>("default_extract_dir", { path }),
   quickExtractDest: (path: string, mode: string) =>
     invoke<string>("quick_extract_dest", { path, mode }),
@@ -151,6 +173,8 @@ export const api = {
   onDeepLink: (cb: () => void): Promise<UnlistenFn> =>
     listen("deep-link-available", () => cb()),
 };
+
+export type DragResult = "Dropped" | "Cancel";
 
 export interface AssocEntry {
   ext: string;
@@ -203,6 +227,50 @@ export const ARCHIVE_EXTS = [
 export function isArchive(path: string): boolean {
   const lower = path.toLowerCase();
   return ARCHIVE_EXTS.some((e) => lower.endsWith("." + e));
+}
+
+// 支持增删条目的格式（与后端 archive::edit 的能力一致）。RAR 等只读格式不在其中。
+export const EDITABLE_FORMATS = new Set([
+  "ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST",
+]);
+
+export function isEditableFormat(format: string): boolean {
+  return EDITABLE_FORMATS.has(format);
+}
+
+// 拖放时跟随光标的预览图（原生拖放要求一张位图）。用 canvas 现画一枚标签，
+// 免去打包额外资源；失败时返回 1×1 透明 PNG，保证拖放本身仍能发起。
+const BLANK_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+export function makeDragImage(label: string): string {
+  try {
+    const dpr = 2;
+    const pad = 10;
+    const canvas = document.createElement("canvas");
+    const probe = canvas.getContext("2d");
+    if (!probe) return BLANK_PNG;
+    const font = "600 13px -apple-system, 'Segoe UI', system-ui, sans-serif";
+    probe.font = font;
+    const w = Math.min(260, Math.ceil(probe.measureText(label).width) + pad * 2);
+    const h = 28;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return BLANK_PNG;
+    ctx.scale(dpr, dpr);
+    ctx.font = font;
+    ctx.fillStyle = "rgba(28, 28, 32, 0.92)";
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 7);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, pad, h / 2 + 0.5, w - pad * 2);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return BLANK_PNG;
+  }
 }
 
 // 把一个文件系统绝对路径拆成可点击的面包屑：[此电脑, C:, Users, fan, …]。

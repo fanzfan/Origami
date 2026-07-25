@@ -34,6 +34,7 @@ unrar = "0.5.8"
 walkdir = "2.5.0"
 zip = { version = "8.6.0", features = ["aes-crypto", "deflate", "deflate64", "bzip2", "lzma", "zstd", "xz", "ppmd", "time"] }
 zstd = { version = "0.13.3", features = ["zstdmt"] }
+tauri-plugin-drag = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

@@ -68,8 +68,18 @@ export const zhCN = {
       removed_other: "已删除 {{count}} 项",
       verified: "校验通过，归档完好 ✓",
     },
+    drag: {
+      items_one: "{{count}} 项",
+      items_other: "{{count}} 项",
+    },
+    drop: {
+      addTo: "松开以添加到 {{name}}",
+      compress: "松开以压缩，或松开单个压缩包以打开",
+    },
     info: {
       encryptedOpenCancelled: "已取消打开加密归档",
+      dragPasswordSaved: "已记住密码，请再拖一次",
+      dragReady: "文件已准备好，请再拖一次",
     },
     error: {
       open: "打开失败：{{message}}",
@@ -79,6 +89,7 @@ export const zhCN = {
       add: "添加失败：{{message}}",
       remove: "删除失败：{{message}}",
       verify: "校验失败：{{message}}",
+      dragOut: "拖出失败：{{message}}",
     },
   },
   settings: {

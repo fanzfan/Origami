@@ -598,6 +598,83 @@ async fn extract_entry_to_temp(
     res
 }
 
+/// 把选中条目解压到缓存暂存区，返回可交给系统原生拖放的顶层绝对路径。
+///
+/// 暂存目录按「包路径 + 大小 + 修改时间」取哈希，同一个包重复拖出会复用已解压的
+/// 文件（近乎瞬时）；包一旦被改动，哈希变化，自然拿到新的暂存目录。
+#[tauri::command]
+async fn stage_entries_for_drag(
+    app: tauri::AppHandle,
+    jobs: tauri::State<'_, Arc<Jobs>>,
+    job_id: String,
+    path: String,
+    entries: Vec<String>,
+    password: Option<String>,
+    encoding: Option<String>,
+) -> CmdResult<Vec<String>> {
+    use tauri::Manager;
+    if entries.is_empty() {
+        return Err("没有要拖出的条目".into());
+    }
+    let cancel = jobs.register(&job_id);
+    let fb_app = app.clone();
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&fb_app));
+    let jobs2 = jobs.inner().clone();
+    let jid = job_id.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let src = PathBuf::from(&path);
+        // 包指纹：路径 + 大小 + mtime。任一变化都会换用新的暂存目录，避免拖出旧内容。
+        let meta = std::fs::metadata(&src).map_err(|e| e.to_string())?;
+        let stamp = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let key = format!("{}|{}|{}", path, meta.len(), stamp);
+        let dest = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("drag")
+            .join(format!("{:x}", seahash_like(&key)));
+
+        // 条目 → 暂存区里对应的绝对路径。非法（含 ..）的条目直接拒绝。
+        let mut outs = Vec::with_capacity(entries.len());
+        for e in &entries {
+            let rel = archive::sanitize_rel_path(e.trim_end_matches('/'))
+                .ok_or_else(|| "条目路径非法".to_string())?;
+            outs.push(dest.join(rel));
+        }
+        // 全部已在暂存区 → 跳过解压，直接复用。
+        if !outs.iter().all(|p| p.exists()) {
+            std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+            let ctx = Ctx { app: &app, cancel };
+            let opts = ExtractOptions {
+                job_id: jid,
+                password,
+                fallback_passwords: fallbacks,
+                encoding: encoding.unwrap_or_else(|| "auto".into()),
+                entries: entries.clone(),
+                smart: false,
+            };
+            archive::extract::extract(&ctx, &src, &dest, &opts).map_err(err_str)?;
+        }
+        let missing = outs.iter().any(|p| !p.exists());
+        if missing {
+            return Err("解压后未找到目标文件".to_string());
+        }
+        Ok(outs
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    jobs2.finish(&job_id);
+    res
+}
+
 /// 轻量非加密哈希，仅用于生成临时目录名。
 fn seahash_like(s: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -1050,6 +1127,8 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // 拖出：从窗口内向系统发起原生文件拖放（前端直接调 plugin:drag|start_drag）。
+        .plugin(tauri_plugin_drag::init())
         .setup(|app| {
             // 首次启动若带参数（Windows/Linux 关联打开或右键压缩），在此投递。
             #[cfg(not(target_os = "macos"))]
@@ -1091,6 +1170,7 @@ pub fn run() {
             system_auth_available,
             system_auth,
             extract_entry_to_temp,
+            stage_entries_for_drag,
             default_extract_dir,
             quick_extract_dest,
             request_open_in_main,
