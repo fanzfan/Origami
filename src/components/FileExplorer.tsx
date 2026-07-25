@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DirListing, FsEntry, fmtDate, fmtSize, fsBreadcrumbs, isArchive } from "../api";
 import { FileIcon, UiIcon } from "../icons";
 import { PathBar } from "./PathBar";
+import { useDragOut } from "./useDragOut";
 
 // 应用内文件管理器（文件系统视图）。浏览任意真实路径；双击文件夹进入、双击压缩包
 // 像进文件夹一样进入其内部、双击普通文件用默认程序打开。右键菜单为「压缩」（与压缩包
@@ -13,6 +14,8 @@ interface Props {
   onOpenArchive: (path: string) => void;
   onOpenFile: (path: string) => void;
   onCompress: (paths: string[]) => void;
+  // 把真实文件拖到应用外（无需解压，直接交给系统原生拖放）。
+  onDragOut: (paths: string[]) => void;
 }
 
 type SortKey = "name" | "size" | "mtime";
@@ -76,6 +79,18 @@ export function FileExplorer(p: Props) {
     else if (isArchive(row.path)) p.onOpenArchive(row.path);
     else p.onOpenFile(row.path);
   };
+
+  // 拖出到应用外：这里已经是真实文件，直接交给外层发起系统原生拖放。
+  // 拖动未选中的行时先把它单选。
+  const armDragOut = useDragOut((path) => {
+    if (selected.has(path)) {
+      p.onDragOut([...selected]);
+    } else {
+      setSelected(new Set([path]));
+      setLastClicked(path);
+      p.onDragOut([path]);
+    }
+  });
 
   const openMenu = (row: FsEntry, e: React.MouseEvent) => {
     e.preventDefault();
@@ -168,6 +183,7 @@ export function FileExplorer(p: Props) {
               <tr
                 key={r.path}
                 className={selected.has(r.path) ? "sel" : ""}
+                onMouseDown={(e) => armDragOut(r.path, e)}
                 onClick={(e) => toggleSelect(r, e)}
                 onDoubleClick={() => onDouble(r)}
                 onContextMenu={(e) => openMenu(r, e)}

@@ -4,7 +4,18 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { api, ARCHIVE_EXTS, ArchiveInfo, DirListing, isArchive, newJobId, Progress } from "./api";
+import {
+  api,
+  ARCHIVE_EXTS,
+  ArchiveInfo,
+  DirListing,
+  isArchive,
+  isEditableFormat,
+  makeDragImage,
+  newJobId,
+  Progress,
+  splitParent,
+} from "./api";
 import { Welcome } from "./components/Welcome";
 import { Browser } from "./components/Browser";
 import { FileExplorer } from "./components/FileExplorer";
@@ -52,6 +63,8 @@ export default function App() {
   const [encoding, setEncoding] = useState("auto");
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  // 当前所在的包内目录，由 Browser 上报；拖入文件时作为添加的目标目录。
+  const [archiveCwd, setArchiveCwd] = useState("");
   const [recent, setRecent] = useState<string[]>(loadRecent);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [job, setJob] = useState<JobState | null>(null);
@@ -210,23 +223,30 @@ export default function App() {
   }, []);
 
   // ----- file drop & open-with -----
+  /** 落点为「初始界面 / 文件系统视图」时的规则：单个压缩包 → 打开；其余 → 新建压缩包。 */
+  const openOrCompress = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 1 && isArchive(paths[0])) openArchive(paths[0]);
+      else if (paths.length > 0) setCreateFor(paths);
+    },
+    [openArchive],
+  );
+
+  // 真正的落点处理在 addSources 之后定义；这里用 ref 转发，避免监听器随状态反复重订阅
+  // （unlisten 是异步的，重订阅期间的拖放可能丢失）。
+  const dropRef = useRef<(paths: string[]) => void>(() => {});
   useEffect(() => {
     const un = getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "over") setDragOver(true);
       else if (e.payload.type === "drop") {
         setDragOver(false);
-        const paths = e.payload.paths;
-        if (paths.length === 1 && isArchive(paths[0])) {
-          openArchive(paths[0]);
-        } else if (paths.length > 0) {
-          setCreateFor(paths);
-        }
+        dropRef.current(e.payload.paths);
       } else setDragOver(false);
     });
     return () => {
       un.then((f) => f());
     };
-  }, [openArchive]);
+  }, []);
 
   // ----- Finder 右键 / 双击打开（深链 + 启动前积压的动作）-----
   /** 返回是否成功（取消视为成功，不需要回到主窗口报错）。 */
@@ -309,13 +329,10 @@ export default function App() {
         const quickExtracts: { mode: string; path: string }[] = [];
         for (const a of actions) {
           if (a.kind === "open") {
-            // 与窗口内拖放一致：单个归档 → 打开；其它（普通文件 / 文件夹 / 多个文件，
-            // 例如拖到 Dock 图标或 Windows 快捷方式上）→ 进入压缩。
-            if (a.paths.length === 1 && isArchive(a.paths[0])) {
-              openArchive(a.paths[0]);
-            } else if (a.paths.length > 0) {
-              setCreateFor(a.paths);
-            }
+            // 单个归档 → 打开；其它（普通文件 / 文件夹 / 多个文件，例如拖到 Dock 图标
+            // 或 Windows 快捷方式上）→ 进入压缩。这里不走「添加到已打开的包」：从外壳
+            // 触发的打开动作，落到当前包里会很意外。
+            openOrCompress(a.paths);
           } else if (a.kind === "create") {
             // ask（详细设置）已由 ask 小窗处理，不会进到这里；其余为快捷压缩。
             quickCreates.push(a);
@@ -343,7 +360,7 @@ export default function App() {
     } finally {
       draining.current = false;
     }
-  }, [openArchive, quickCreate, quickExtract]);
+  }, [openOrCompress, quickCreate, quickExtract]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -453,17 +470,18 @@ export default function App() {
     [createFor, toast, settings.excludeJunk, fsListing, browseDir, t],
   );
 
-  const runAdd = useCallback(
-    async (dir: string) => {
+  /** 把真实路径添加进当前打开的压缩包的 dir 目录。 */
+  const addSources = useCallback(
+    async (sources: string[], dir: string) => {
       if (!archivePath) return;
-      const sel = await openDialog({ multiple: true, title: t("app.dialog.addFiles") });
-      const sources = Array.isArray(sel) ? sel : typeof sel === "string" ? [sel] : [];
-      if (sources.length === 0) return;
+      // 把包自己拖进自己会无限套娃，直接剔除。
+      const list = sources.filter((s) => s !== archivePath);
+      if (list.length === 0) return;
       const jobId = newJobId();
       setJob({ jobId, title: t("app.status.adding"), progress: null });
       try {
-        await api.archiveAdd({ jobId, path: archivePath, sources, dir, password, encoding });
-        toast("ok", t("app.success.added", { count: sources.length }));
+        await api.archiveAdd({ jobId, path: archivePath, sources: list, dir, password, encoding });
+        toast("ok", t("app.success.added", { count: list.length }));
         await openArchive(archivePath, password, encoding);
       } catch (e) {
         const msg = String(e);
@@ -474,6 +492,82 @@ export default function App() {
       }
     },
     [archivePath, password, encoding, openArchive, toast, t],
+  );
+
+  const runAdd = useCallback(
+    async (dir: string) => {
+      if (!archivePath) return;
+      const sel = await openDialog({ multiple: true, title: t("app.dialog.addFiles") });
+      const sources = Array.isArray(sel) ? sel : typeof sel === "string" ? [sel] : [];
+      if (sources.length > 0) await addSources(sources, dir);
+    },
+    [archivePath, addSources, t],
+  );
+
+  // 拖入应用：已打开可编辑的压缩包 → 添加到当前包内目录；否则按初始界面的规则处理。
+  // 只读格式（RAR 等）无法添加，退回「打开 / 新建压缩包」，不至于让拖放无声失败。
+  const addOnDrop = !!(archivePath && info && isEditableFormat(info.format));
+  const handleDrop = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (addOnDrop) addSources(paths, archiveCwd);
+      else openOrCompress(paths);
+    },
+    [addOnDrop, addSources, archiveCwd, openOrCompress],
+  );
+  dropRef.current = handleDrop;
+
+  // 从压缩包内拖到应用外：先把选中条目解压到暂存区，再发起系统原生拖放。
+  // 暂存区按包指纹缓存，同一批条目再次拖出几乎瞬时。
+  const dragOutEntries = useCallback(
+    async (entries: string[]) => {
+      if (!archivePath || entries.length === 0) return;
+      const label =
+        entries.length === 1
+          ? entries[0].replace(/\/+$/, "").split("/").pop()!
+          : t("app.drag.items", { count: entries.length });
+      try {
+        const started = performance.now();
+        const staged = await api.stageEntriesForDrag({
+          jobId: newJobId(),
+          path: archivePath,
+          entries,
+          password,
+          encoding,
+        });
+        const slow = performance.now() - started > 500;
+        const result = await api.startNativeDrag(staged, makeDragImage(label));
+        // 解压耗时较久时鼠标多半已经松开，拖放起不来。此时暂存区已就绪，再拖一次即可。
+        if (slow && result === "Cancel") toast("info", t("app.info.dragReady"));
+      } catch (e) {
+        const msg = String(e);
+        if (msg === "CANCELLED") return;
+        if (msg === "PASSWORD_REQUIRED") {
+          // 拖放动作此时已经结束，无法接着拖；记住密码并提示重拖一次。
+          const pw = await askPassword();
+          if (pw) {
+            setPassword(pw);
+            toast("info", t("app.info.dragPasswordSaved"));
+          }
+          return;
+        }
+        toast("error", t("app.error.dragOut", { message: msg }));
+      }
+    },
+    [archivePath, password, encoding, askPassword, toast, t],
+  );
+
+  // 文件系统视图里拖出：已经是真实文件，直接发起原生拖放。
+  const dragOutFiles = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      const label =
+        paths.length === 1 ? splitParent(paths[0]).name : t("app.drag.items", { count: paths.length });
+      api.startNativeDrag(paths, makeDragImage(label)).catch((e) => {
+        toast("error", t("app.error.dragOut", { message: String(e) }));
+      });
+    },
+    [toast, t],
   );
 
   const runRemove = useCallback(
@@ -593,7 +687,9 @@ export default function App() {
       </div>
 
       {info && archivePath ? (
+        // key：换包时重置浏览器内部状态（当前目录、选中项），避免停留在上一个包的路径。
         <Browser
+          key={archivePath}
           info={info}
           archivePath={archivePath}
           loading={loading}
@@ -605,6 +701,8 @@ export default function App() {
           onOpenExternal={openExternal}
           onAdd={runAdd}
           onRemove={runRemove}
+          onDragOut={dragOutEntries}
+          onCwdChange={setArchiveCwd}
           onNavigateFs={navigateFs}
         />
       ) : fsListing ? (
@@ -615,6 +713,7 @@ export default function App() {
           onOpenArchive={openArchive}
           onOpenFile={(path) => openPath(path).catch((e) => toast("error", t("app.error.open", { message: String(e) })))}
           onCompress={(paths) => setCreateFor(paths)}
+          onDragOut={dragOutFiles}
         />
       ) : (
         <Welcome
@@ -627,6 +726,20 @@ export default function App() {
           onCompressFolder={pickFolderToCompress}
           onBrowse={() => browseDir()}
         />
+      )}
+
+      {/* 拖入提示：初始界面自带拖放区，这里只覆盖压缩包 / 文件系统视图。 */}
+      {dragOver && (archivePath || fsListing) && (
+        <div className="drop-overlay">
+          <div className="drop-overlay-card">
+            <UiIcon name={addOnDrop ? "add" : "folder-archive"} size={30} />
+            <p>
+              {addOnDrop
+                ? t("app.drop.addTo", { name: splitParent(archivePath!).name })
+                : t("app.drop.compress")}
+            </p>
+          </div>
+        </div>
       )}
 
       {extractFor && archivePath && (
