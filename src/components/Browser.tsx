@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArchiveInfo, Entry, fmtDate, fmtSize, fsBreadcrumbs, splitParent } from "../api";
+import { ArchiveInfo, Entry, fmtDate, fmtSize, fsBreadcrumbs, isEditableFormat, splitParent } from "../api";
 import { FileIcon, UiIcon } from "../icons";
 import { EntryProperties } from "./dialogs";
 import { PathBar } from "./PathBar";
+import { useDragOut } from "./useDragOut";
 
 interface Props {
   info: ArchiveInfo;
@@ -16,12 +17,14 @@ interface Props {
   onOpenExternal: (entryPath: string) => void;
   onAdd: (dir: string) => void;
   onRemove: (entries: string[]) => void;
+  // 把条目拖到应用外：由外层解压到暂存区后发起系统原生拖放。
+  onDragOut: (entries: string[]) => void;
+  // 当前包内目录变化时通知外层（拖入文件时作为添加的目标目录）。
+  onCwdChange?: (cwd: string) => void;
   // 导航到某个真实文件系统目录（离开压缩包）。"" = 此电脑。由路径栏的文件系统段
   // 与压缩包根的 .. 触发。
   onNavigateFs?: (path: string) => void;
 }
-
-const EDITABLE = new Set(["ZIP", "7Z", "TAR", "TAR.GZ", "TAR.BZ2", "TAR.XZ", "TAR.ZST"]);
 
 interface Row {
   name: string;
@@ -63,7 +66,7 @@ export function Browser(p: Props) {
   const [propsRow, setPropsRow] = useState<Row | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const editable = EDITABLE.has(p.info.format);
+  const editable = isEditableFormat(p.info.format);
 
   const rows = useMemo(() => {
     const prefix = cwd ? cwd + "/" : "";
@@ -204,6 +207,24 @@ export function Browser(p: Props) {
     setCwd(path);
     setSelected(new Set());
   }, []);
+
+  // 把当前包内目录同步给外层：拖入文件时以它作为添加的目标目录。
+  useEffect(() => {
+    p.onCwdChange?.(cwd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwd]);
+
+  // 拖出到应用外：交给外层解压到暂存区后发起系统原生拖放，落到访达/资源管理器里的
+  // 才是真实文件。拖动未选中的行时先把它单选，符合文件管理器的习惯。
+  const armDragOut = useDragOut((path) => {
+    if (selected.has(path)) {
+      p.onDragOut([...selected]);
+    } else {
+      setSelected(new Set([path]));
+      setLastClicked(path);
+      p.onDragOut([path]);
+    }
+  });
 
   const goUp = useCallback(() => {
     if (!cwd) {
@@ -425,6 +446,7 @@ export function Browser(p: Props) {
                 <tr
                   key={r.path}
                   className={selected.has(r.path) ? "sel" : ""}
+                  onMouseDown={(e) => armDragOut(r.path, e)}
                   onClick={(e) => toggleSelect(r, e)}
                   onDoubleClick={() => onDouble(r)}
                   onContextMenu={(e) => openMenu(r, e)}

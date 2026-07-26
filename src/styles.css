@@ -337,6 +337,35 @@ input[type="checkbox"] { accent-color: var(--accent); }
   color: var(--accent-text);
 }
 .dropzone strong { font-weight: 600; }
+
+/* 拖入提示浮层：压缩包 / 文件系统视图没有常驻拖放区，拖动经过时临时盖一层。 */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  pointer-events: none; /* 系统级拖放，浮层不能吃掉事件 */
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 80%;
+  padding: 26px 34px;
+  border: 2px dashed var(--accent);
+  border-radius: 15px;
+  background: var(--bg-elev);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+  color: var(--accent-text);
+  text-align: center;
+}
+.drop-overlay-card p { margin: 0; font-weight: 600; color: var(--text); }
 .welcome .actions { display: flex; justify-content: center; gap: 9px; flex-wrap: wrap; }
 .recent {
   width: min(680px, 90vw);
@@ -693,6 +722,31 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
 }
 [data-window="ask"] .modal .body { flex: 1; min-height: 0; }
 [data-window="ask"] .modal-header { -webkit-app-region: drag; }
+
+/* Windows：卡片铺满整窗、直角、不描边不投影——圆角与描边全部交给 DWM（系统圆角是干净的，
+   前端在透明窗上自绘会出毛刺；描边由 main.tsx 调 set_window_border_color 染成卡片底色而隐形）。
+   卡片原来那样留白+描边时，不透明窗口的留白处透出的是网页底色，看着就是多出一层「怪边框」。
+   卡片圆角须为 0：否则卡片自己的弯角与 DWM 的裁切之间会露出一小块底色。
+   macOS 仍是透明窗 + 浮起卡片，不受影响。 */
+:root[data-platform="windows"][data-window="ask"] body { background: var(--bg-elev); }
+[data-platform="windows"][data-window="ask"] .overlay { padding: 0; }
+[data-platform="windows"][data-window="ask"] .modal {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg-elev);
+}
+[data-platform="windows"][data-window="ask"] .mini-progress {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background:
+    radial-gradient(circle at 90% -30%, color-mix(in srgb, var(--accent-alt) 14%, transparent), transparent 52%),
+    var(--bg-elev);
+}
 
 /* ---------- settings ---------- */
 .settings-section { font-size: 12px; color: var(--text-dim); font-weight: 600; margin: 8px 0 -3px; }

@@ -235,6 +235,8 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
             (520.0, 620.0)
         }
     };
+    // Windows 上卡片铺满整窗、圆角与描边都交给 DWM（前端启动时调 set_window_border_color
+    // 把描边染成卡片底色，见 winmat::apply_rounded_frame），故窗口保持不透明。
     let mut b = tauri::WebviewWindowBuilder::new(
         app,
         "ask",
@@ -624,6 +626,83 @@ async fn extract_entry_to_temp(
     res
 }
 
+/// 把选中条目解压到缓存暂存区，返回可交给系统原生拖放的顶层绝对路径。
+///
+/// 暂存目录按「包路径 + 大小 + 修改时间」取哈希，同一个包重复拖出会复用已解压的
+/// 文件（近乎瞬时）；包一旦被改动，哈希变化，自然拿到新的暂存目录。
+#[tauri::command]
+async fn stage_entries_for_drag(
+    app: tauri::AppHandle,
+    jobs: tauri::State<'_, Arc<Jobs>>,
+    job_id: String,
+    path: String,
+    entries: Vec<String>,
+    password: Option<String>,
+    encoding: Option<String>,
+) -> CmdResult<Vec<String>> {
+    use tauri::Manager;
+    if entries.is_empty() {
+        return Err("没有要拖出的条目".into());
+    }
+    let cancel = jobs.register(&job_id);
+    let fb_app = app.clone();
+    let fallbacks = passwords::LazyPasswords::new(move || passwords::candidates(&fb_app));
+    let jobs2 = jobs.inner().clone();
+    let jid = job_id.clone();
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let src = PathBuf::from(&path);
+        // 包指纹：路径 + 大小 + mtime。任一变化都会换用新的暂存目录，避免拖出旧内容。
+        let meta = std::fs::metadata(&src).map_err(|e| e.to_string())?;
+        let stamp = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let key = format!("{}|{}|{}", path, meta.len(), stamp);
+        let dest = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("drag")
+            .join(format!("{:x}", seahash_like(&key)));
+
+        // 条目 → 暂存区里对应的绝对路径。非法（含 ..）的条目直接拒绝。
+        let mut outs = Vec::with_capacity(entries.len());
+        for e in &entries {
+            let rel = archive::sanitize_rel_path(e.trim_end_matches('/'))
+                .ok_or_else(|| "条目路径非法".to_string())?;
+            outs.push(dest.join(rel));
+        }
+        // 全部已在暂存区 → 跳过解压，直接复用。
+        if !outs.iter().all(|p| p.exists()) {
+            std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+            let ctx = Ctx { app: &app, cancel };
+            let opts = ExtractOptions {
+                job_id: jid,
+                password,
+                fallback_passwords: fallbacks,
+                encoding: encoding.unwrap_or_else(|| "auto".into()),
+                entries: entries.clone(),
+                smart: false,
+            };
+            archive::extract::extract(&ctx, &src, &dest, &opts).map_err(err_str)?;
+        }
+        let missing = outs.iter().any(|p| !p.exists());
+        if missing {
+            return Err("解压后未找到目标文件".to_string());
+        }
+        Ok(outs
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    jobs2.finish(&job_id);
+    res
+}
+
 /// 轻量非加密哈希，仅用于生成临时目录名。
 fn seahash_like(s: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -713,6 +792,24 @@ fn set_acrylic(
         } else {
             winmat::clear_acrylic(hwnd)?;
         }
+    }
+    Ok(())
+}
+
+/// 把**调用方窗口**的 Win11 系统描边染成 `(r,g,b)`，同时确保圆角（见
+/// `winmat::apply_rounded_frame`）。由铺满整窗的 ask 小窗在启动时按卡片底色调用，
+/// 使那圈描边与卡片同色、看不出来。非 Windows 平台为安全空操作。
+#[tauri::command]
+fn set_window_border_color(
+    #[allow(unused_variables)] window: tauri::Window,
+    #[allow(unused_variables)] r: u8,
+    #[allow(unused_variables)] g: u8,
+    #[allow(unused_variables)] b: u8,
+) -> CmdResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        winmat::apply_rounded_frame(hwnd.0 as isize, r, g, b);
     }
     Ok(())
 }
@@ -1076,6 +1173,8 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // 拖出：从窗口内向系统发起原生文件拖放（前端直接调 plugin:drag|start_drag）。
+        .plugin(tauri_plugin_drag::init())
         .setup(|app| {
             // 首次启动若带参数（Windows/Linux 关联打开或右键压缩），在此投递。
             #[cfg(not(target_os = "macos"))]
@@ -1117,6 +1216,7 @@ pub fn run() {
             system_auth_available,
             system_auth,
             extract_entry_to_temp,
+            stage_entries_for_drag,
             default_extract_dir,
             quick_extract_dest,
             request_open_in_main,
@@ -1133,6 +1233,7 @@ pub fn run() {
             shell_menu_installed,
             app_platform,
             set_acrylic,
+            set_window_border_color,
             file_assoc_supported,
             file_assoc_list,
             file_assoc_set,

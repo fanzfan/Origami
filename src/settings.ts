@@ -126,15 +126,18 @@ export function applySettings(s: Settings) {
 const isWindows = () => /Windows/.test(navigator.userAgent) || navigator.platform.startsWith("Win");
 const isMacOS = () => /Mac|iPhone|iPad/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
 
-// 取当前主题的窗口背景色（CSS 变量 --bg，形如 #rrggbb）作亚克力色调基色，
-// 使玻璃色调与应用配色一致。解析失败时按深/浅色给个中性回退值。
-function readBgRgb(): [number, number, number] {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+// 取当前主题下某个颜色变量（形如 #rrggbb）的 RGB，用于把颜色交给需要原生色值的窗口接口
+// （亚克力色调、Win11 窗口描边色）。解析失败时按深/浅色给个中性回退值。
+export function readThemeRgb(name: string): [number, number, number] {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(raw);
   if (m) return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   return dark ? [22, 24, 29] : [245, 246, 248];
 }
+
+// 亚克力色调基色取窗口背景色，使玻璃色调与应用配色一致。
+const readBgRgb = () => readThemeRgb("--bg");
 
 // 窗口材质（Win11 亚克力/云母 / macOS 毛玻璃）。仅作用于当前（主）窗口。
 //

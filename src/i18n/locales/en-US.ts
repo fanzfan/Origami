@@ -74,8 +74,18 @@ export const enUS = {
       removed_other: "Removed {{count}} items",
       verified: "Verification passed. The archive is intact ✓",
     },
+    drag: {
+      items_one: "{{count}} item",
+      items_other: "{{count}} items",
+    },
+    drop: {
+      addTo: "Drop to add to {{name}}",
+      compress: "Drop to compress, or drop a single archive to open it",
+    },
     info: {
       encryptedOpenCancelled: "Opening the encrypted archive was cancelled",
+      dragPasswordSaved: "Password saved — drag again",
+      dragReady: "Files are ready — drag again",
     },
     error: {
       open: "Failed to open: {{message}}",
@@ -85,6 +95,7 @@ export const enUS = {
       add: "Failed to add files: {{message}}",
       remove: "Failed to remove entries: {{message}}",
       verify: "Verification failed: {{message}}",
+      dragOut: "Drag out failed: {{message}}",
     },
   },
   settings: {

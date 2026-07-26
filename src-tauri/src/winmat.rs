@@ -16,7 +16,10 @@
 use std::ffi::c_void;
 use windows::core::s;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE};
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_SYSTEMBACKDROP_TYPE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE,
+};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 
 // accent 状态（未公开，取自 window-vibrancy）。
@@ -88,6 +91,40 @@ pub fn apply_acrylic(hwnd: isize, r: u8, g: u8, b: u8, alpha: u8) -> Result<(), 
         swca(hwnd, &mut data as *mut _);
     }
     Ok(())
+}
+
+/// 保住 Win11 圆角，同时把窗口那圈 1px 系统描边染成 `(r,g,b)`——取卡片底色即与卡片同色、
+/// 看不出边框。用于铺满整窗的无装饰卡片窗口（ask 小窗）。
+///
+/// `decorations(false)` 只去掉标题栏，窗口仍保留 sizing frame，Win11 会沿窗口矩形描 1px 边框，
+/// 叠上卡片自己的描边就成了双层「怪边框」。两条弯路都试过，别再走：
+///   * `DWMWA_COLOR_NONE`（去掉描边）会连 DWM 的圆角裁切一起失效，窗口变直角；
+///   * 改成透明窗 + 前端自绘 border-radius，圆角边缘会出现毛刺与半透明残角
+///     （WebView2 的透明合成做不出干净的圆角边）。
+/// 只有保留系统描边、让它与卡片同色，才能既是干净的系统圆角、又看不到边框。
+///
+/// 两个属性都需要 Win11（22000+）；旧系统上属性未知，调用失败可忽略（Win10 的无边框窗口
+/// 本来既不描边也不圆角）。
+pub fn apply_rounded_frame(hwnd: isize, r: u8, g: u8, b: u8) {
+    let hwnd = HWND(hwnd as *mut c_void);
+    unsafe {
+        // 显式要求圆角，不依赖 DWM 对无装饰窗口的默认判断。
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const c_void,
+            std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+        );
+        // COLORREF 是 0x00BBGGRR，与常见的 0xRRGGBB 字节序相反。
+        let color: u32 = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16);
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            &color as *const _ as *const c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
 }
 
 /// 清除本模块施加的 accent 亚克力（恢复到无 accent 状态）。
