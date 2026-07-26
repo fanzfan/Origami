@@ -173,7 +173,7 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     if app.get_webview_window("mini").is_some() {
         return Ok(());
     }
-    let r = tauri::WebviewWindowBuilder::new(
+    let mut b = tauri::WebviewWindowBuilder::new(
         app,
         "mini",
         tauri::WebviewUrl::App("index.html?mini=1".into()),
@@ -182,9 +182,32 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     .inner_size(480.0, 190.0)
     .resizable(false)
     .always_on_top(true)
-    .center()
-    .build();
-    r.map(|_| ()).map_err(|e| e.to_string())
+    .center();
+    // Windows：WebView2 首帧前默认底色是纯白，弹窗时会白闪一下；
+    // 改成贴近前端主题的背景色（深浅随系统）。窗口不能隐藏创建——
+    // visible:false 的新建小窗 WebView2 不跑 JS，无法由前端延迟显示。
+    #[cfg(target_os = "windows")]
+    {
+        b = b.background_color(theme_background(app));
+    }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 小窗首帧前的窗口/WebView2 底色：贴近前端默认主题的 --bg，深浅随系统。
+/// （用户若强制与系统相反的深浅模式，首帧会有一瞬色差，但远好于纯白闪烁。）
+#[cfg(target_os = "windows")]
+fn theme_background(app: &tauri::AppHandle) -> tauri::window::Color {
+    use tauri::Manager;
+    let dark = app
+        .get_webview_window("main")
+        .and_then(|w| w.theme().ok())
+        .map(|t| t == tauri::Theme::Dark)
+        .unwrap_or(false);
+    if dark {
+        tauri::window::Color(17, 21, 34, 255)
+    } else {
+        tauri::window::Color(244, 247, 252, 255)
+    }
 }
 
 /// 创建「ask」小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
@@ -212,7 +235,7 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
             (520.0, 620.0)
         }
     };
-    tauri::WebviewWindowBuilder::new(
+    let mut b = tauri::WebviewWindowBuilder::new(
         app,
         "ask",
         tauri::WebviewUrl::App("index.html?ask=1".into()),
@@ -223,10 +246,13 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     .resizable(true)
     .decorations(false)
     .transparent(cfg!(target_os = "macos"))
-    .center()
-    .build()
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    .center();
+    // 与迷你窗同理：用主题底色替代 WebView2 首帧前的默认白底，消除白闪。
+    #[cfg(target_os = "windows")]
+    {
+        b = b.background_color(theme_background(app));
+    }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
 }
 
 type CmdResult<T> = Result<T, String>;
