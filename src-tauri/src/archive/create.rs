@@ -506,51 +506,91 @@ fn create_tar<R: tauri::Runtime>(
 
 // ---------------- volume split ----------------
 
+/// 分卷下限：再小就只会切出成千上万个碎片文件，多半是误操作。
+pub const MIN_VOLUME_SIZE: u64 = 64 * 1024;
+
+fn part_path(dest: &Path, idx: u32) -> PathBuf {
+    PathBuf::from(format!("{}.{:03}", dest.to_string_lossy(), idx))
+}
+
+/// 删除 `from` 号起残留的旧分卷（上次分卷比这次多时会留下尾巴，
+/// 不清掉会被当成本次分卷的一部分，解压出来就是坏包）。
+fn remove_stale_parts(dest: &Path, from: u32) {
+    let mut gap = 0u32;
+    let mut i = from;
+    while gap < 3 {
+        let p = part_path(dest, i);
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+            gap = 0;
+        } else {
+            gap += 1;
+        }
+        i += 1;
+    }
+}
+
 fn split_volumes(
     ctx: &Ctx<impl tauri::Runtime>,
     dest: &Path,
     job_id: &str,
     size: u64,
 ) -> anyhow::Result<String> {
+    if size < MIN_VOLUME_SIZE {
+        anyhow::bail!("分卷大小不能小于 {} KB", MIN_VOLUME_SIZE / 1024);
+    }
     let meta = std::fs::metadata(dest)?;
     if meta.len() <= size {
+        // 单卷装得下就不分卷；但仍要清掉可能残留的旧分卷。
+        remove_stale_parts(dest, 1);
         return Ok(dest.to_string_lossy().to_string());
     }
     let t = Tracker::new(ctx, job_id, meta.len());
     let mut input = BufReader::new(File::open(dest)?);
     let mut idx = 1u32;
     let mut first = String::new();
-    loop {
-        t.check()?;
-        let part = format!("{}.{:03}", dest.to_string_lossy(), idx);
-        t.set_file(&part);
-        let mut out = BufWriter::new(File::create(&part)?);
-        let mut remaining = size;
-        let mut buf = [0u8; 64 * 1024];
-        let mut wrote = 0u64;
-        while remaining > 0 {
-            let want = remaining.min(buf.len() as u64) as usize;
-            let n = input.read(&mut buf[..want])?;
-            if n == 0 {
+    let res = (|| -> anyhow::Result<()> {
+        loop {
+            t.check()?;
+            let part = part_path(dest, idx);
+            let part_str = part.to_string_lossy().to_string();
+            t.set_file(&part_str);
+            let mut out = BufWriter::new(File::create(&part)?);
+            let mut remaining = size;
+            let mut buf = [0u8; 64 * 1024];
+            let mut wrote = 0u64;
+            while remaining > 0 {
+                let want = remaining.min(buf.len() as u64) as usize;
+                let n = input.read(&mut buf[..want])?;
+                if n == 0 {
+                    break;
+                }
+                out.write_all(&buf[..n])?;
+                remaining -= n as u64;
+                wrote += n as u64;
+                t.add(n as u64)?;
+            }
+            out.flush()?;
+            if idx == 1 {
+                first = part_str;
+            }
+            if wrote < size {
+                if wrote == 0 {
+                    let _ = std::fs::remove_file(&part);
+                    idx -= 1;
+                }
                 break;
             }
-            out.write_all(&buf[..n])?;
-            remaining -= n as u64;
-            wrote += n as u64;
-            t.add(n as u64)?;
+            idx += 1;
         }
-        out.flush()?;
-        if idx == 1 {
-            first = part.clone();
-        }
-        if wrote < size {
-            if wrote == 0 {
-                let _ = std::fs::remove_file(&part);
-            }
-            break;
-        }
-        idx += 1;
+        Ok(())
+    })();
+    if let Err(e) = res {
+        // 取消/出错：把这次已经写出的分卷清干净，不留半成品。
+        remove_stale_parts(dest, 1);
+        return Err(e);
     }
+    remove_stale_parts(dest, idx + 1);
     std::fs::remove_file(dest)?;
     Ok(first)
 }

@@ -1,9 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArchiveInfo, Entry, fmtDate, fmtSize, fsBreadcrumbs, isEditableFormat, splitParent } from "../api";
+import {
+  ArchiveInfo,
+  Entry,
+  fmtDate,
+  fmtSize,
+  fsBreadcrumbs,
+  isEditableFormat,
+  splitParent,
+  type VolumeKind,
+} from "../api";
 import { FileIcon, UiIcon } from "../icons";
 import { EntryProperties } from "./dialogs";
 import { PathBar } from "./PathBar";
 import { useDragOut } from "./useDragOut";
+
+const VOLUME_KIND_LABEL: Record<VolumeKind, string> = {
+  numeric: "按字节切分（.001 / .002 …）",
+  rarPart: "RAR 原生分卷（.partN.rar）",
+  rarOld: "RAR 老式分卷（.rNN）",
+  zipSpanned: "跨卷 ZIP（.z01 + .zip）",
+};
 
 interface Props {
   info: ArchiveInfo;
@@ -66,7 +82,8 @@ export function Browser(p: Props) {
   const [propsRow, setPropsRow] = useState<Row | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const editable = isEditableFormat(p.info.format);
+  // 分卷包只读：条目增删要整包重切，卷边界无从保证。
+  const editable = isEditableFormat(p.info.format) && !p.info.volumes;
 
   const rows = useMemo(() => {
     const prefix = cwd ? cwd + "/" : "";
@@ -490,6 +507,23 @@ export function Browser(p: Props) {
           </span>
         )}
         <span className="spacer" />
+        {p.info.volumes && (
+          <span
+            className={p.info.volumes.missing.length > 0 ? "danger" : undefined}
+            title={[
+              VOLUME_KIND_LABEL[p.info.volumes.kind],
+              `共 ${fmtSize(p.info.volumes.totalSize)}`,
+              p.info.volumes.missing.length > 0
+                ? `缺少 ${p.info.volumes.missing.length} 卷：${p.info.volumes.missing.join(", ")}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join("\n")}
+          >
+            <UiIcon name="layers" size={13} /> 分卷 · {p.info.volumes.count} 卷
+            {p.info.volumes.missing.length > 0 ? "（不完整）" : ""}
+          </span>
+        )}
         {p.info.hasEncrypted && <span><UiIcon name="lock" size={13} /> 含加密内容</span>}
         {p.info.comment && <span title={p.info.comment}><UiIcon name="comment" size={13} /> 含注释</span>}
         <span>{p.info.format}</span>

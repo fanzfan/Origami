@@ -96,6 +96,13 @@ export const enUS = {
       remove: "Failed to remove entries: {{message}}",
       verify: "Verification failed: {{message}}",
       dragOut: "Drag out failed: {{message}}",
+      reason: {
+        missingVolumes:
+          "The volume set is incomplete. Missing: {{names}}. Keep every volume in the same folder.",
+        spannedZip:
+          "Spanned ZIP (.z01 + .zip) is not supported yet. Merge it into a single .zip first.",
+        splitReadonly: "Split archives are read-only — entries cannot be added or removed.",
+      },
     },
   },
   settings: {

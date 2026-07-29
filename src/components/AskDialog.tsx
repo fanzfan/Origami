@@ -5,6 +5,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, PendingAction, Progress } from "../api";
 import { UiIcon } from "../icons";
+import { explainError } from "../i18n";
 import { loadSettings } from "../settings";
 import { CreateDialog, ExtractDialog } from "./dialogs";
 
@@ -142,7 +143,7 @@ export function AskDialog() {
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") next();
-        else setError(t("app.error.compress", { message: msg }));
+        else setError(t("app.error.compress", { message: explainError(msg) }));
       }
     },
     [next, t],
@@ -164,7 +165,7 @@ export function AskDialog() {
           // 加密归档：交给主窗打开，让用户输入密码后在应用内解压。
           await api.requestOpenInMain([path]);
           next();
-        } else setError(t("app.error.extract", { message: msg }));
+        } else setError(t("app.error.extract", { message: explainError(msg) }));
       }
     },
     [next, t],

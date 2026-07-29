@@ -1,3 +1,4 @@
+use super::volume;
 use super::{detect_format, inner_name, sanitize_rel_path, Format};
 use crate::encoding::decode_name;
 use anyhow::Context;
@@ -179,7 +180,9 @@ fn resolve_dest(archive: &Path, dest: &Path, smart: bool, roots: &[String]) -> P
 }
 
 pub fn archive_stem(path: &Path) -> String {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("archive");
+    // 分卷取逻辑名：foo.7z.001 → foo，而不是 foo.7z。
+    let logical = volume::logical_path(path);
+    let name = logical.file_name().and_then(|n| n.to_str()).unwrap_or("archive");
     let lower = name.to_lowercase();
     for ext in [
         ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".tbz2", ".txz", ".tzst", ".zip",
@@ -235,10 +238,10 @@ pub fn extract(
         Format::SevenZ => extract_7z(ctx, archive_path, dest, opts)?,
         Format::Rar => extract_rar(ctx, archive_path, dest, opts)?,
         Format::Tar | Format::TarGz | Format::TarBz2 | Format::TarXz | Format::TarZst => {
-            // 进度按已消耗的压缩字节计：total = 包文件大小
-            let t = Tracker::new(ctx, &opts.job_id, std::fs::metadata(archive_path)?.len());
+            // 进度按已消耗的压缩字节计：total = 包文件大小（分卷则为各卷之和）
+            let t = Tracker::new(ctx, &opts.job_id, volume::total_len(archive_path)?);
             let raw = std::io::BufReader::new(CountingReader::new(
-                BufReader::new(File::open(archive_path)?),
+                volume::open_reader(archive_path)?,
                 t.clone(),
             ));
             let r: Box<dyn Read + Send> = if format == Format::Tar {
@@ -249,10 +252,10 @@ pub fn extract(
             extract_tar(&t, r, archive_path, dest, opts)?
         }
         Format::Gz | Format::Bz2 | Format::Xz | Format::Zst => {
-            let t = Tracker::new(ctx, &opts.job_id, std::fs::metadata(archive_path)?.len());
+            let t = Tracker::new(ctx, &opts.job_id, volume::total_len(archive_path)?);
             t.set_file(&inner_name(archive_path));
             let raw = std::io::BufReader::new(CountingReader::new(
-                BufReader::new(File::open(archive_path)?),
+                volume::open_reader(archive_path)?,
                 t.clone(),
             ));
             let mut r = super::list::decompress_stream(Box::new(raw), format)?;
@@ -289,8 +292,7 @@ fn extract_zip(
     dest: &Path,
     opts: &ExtractOptions,
 ) -> anyhow::Result<PathBuf> {
-    let file = File::open(archive_path)?;
-    let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
+    let mut zip = zip::ZipArchive::new(volume::open_reader(archive_path)?)?;
 
     // Collect decoded names + encrypted flag + size first.
     let mut names: Vec<(String, bool, u64)> = Vec::with_capacity(zip.len());
@@ -407,9 +409,11 @@ fn extract_7z(
     use sevenz_rust2::{ArchiveReader, Password};
 
     // 主密码优先；只有它失败才惰性读取已存密码（避免无谓地读凭据库）。
+    // 分卷经 volume reader 拼接后再交给 7z 解码器。
     let open_with = |cand: &Option<String>| {
         let password = cand.as_deref().map(Password::from).unwrap_or_else(Password::empty);
-        ArchiveReader::open(archive_path, password).ok()
+        let reader = volume::open_reader(archive_path).ok()?;
+        ArchiveReader::new(reader, password).ok()
     };
     let mut reader = open_with(&opts.password).map(|r| (r, opts.password.clone()));
     if reader.is_none() {
@@ -503,6 +507,9 @@ fn extract_rar(
         .map(|e| e.size)
         .sum();
     let t = Tracker::new(ctx, &opts.job_id, total_bytes);
+    // unrar 按路径工作：`.partN.rar` 由它自己续卷，裸切分先合并到临时文件。
+    let native = volume::native_path(archive_path)?;
+    let archive_path = native.path();
 
     // 用单个密码尝试解压：Ok(true)=成功，Ok(false)=密码错误，Err=致命错误。
     let attempt = |cand: &Option<String>| -> anyhow::Result<bool> {
@@ -622,8 +629,7 @@ pub fn test_archive(
     let format = detect_format(archive_path)?;
     let result = match format {
         Format::Zip => {
-            let file = File::open(archive_path)?;
-            let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
+            let mut zip = zip::ZipArchive::new(volume::open_reader(archive_path)?)?;
             let mut total = 0u64;
             for i in 0..zip.len() {
                 total += zip.by_index_raw(i)?.size();
@@ -676,7 +682,12 @@ pub fn test_archive(
                     .as_deref()
                     .map(Password::from)
                     .unwrap_or_else(Password::empty);
-                match ArchiveReader::open(archive_path, pw) {
+                match volume::open_reader(archive_path)
+                    .map_err(|e| {
+                        sevenz_rust2::Error::Io(std::io::Error::other(e.to_string()), "".into())
+                    })
+                    .and_then(|src| ArchiveReader::new(src, pw))
+                {
                     Ok(mut r) => {
                         let total: u64 = r.archive().files.iter().map(|f| f.size).sum();
                         let t = Tracker::new(ctx, job_id, total);
@@ -726,6 +737,8 @@ pub fn test_archive(
                 .map(|i| i.entries.iter().map(|e| e.size).sum())
                 .unwrap_or(0);
             let t = Tracker::new(ctx, job_id, total);
+            let native = volume::native_path(archive_path)?;
+            let archive_path = native.path();
             for cand in cands {
                 let result = (|| -> Result<(), unrar::error::UnrarError> {
                     let archive = match &cand {
@@ -762,10 +775,10 @@ pub fn test_archive(
         }
         _ => {
             // Streamed formats: read through, progress = consumed compressed bytes.
-            let t = Tracker::new(ctx, job_id, std::fs::metadata(archive_path)?.len());
+            let t = Tracker::new(ctx, job_id, volume::total_len(archive_path)?);
             t.set_file(&inner_name(archive_path));
             let raw = BufReader::new(CountingReader::new(
-                BufReader::new(File::open(archive_path)?),
+                volume::open_reader(archive_path)?,
                 t.clone(),
             ));
             let mut r: Box<dyn Read + Send> = if format == Format::Tar {

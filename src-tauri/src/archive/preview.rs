@@ -1,8 +1,8 @@
+use super::volume;
 use super::{detect_format, Format};
 use crate::encoding::decode_name;
 use base64::Engine;
 use serde::Serialize;
-use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
@@ -104,8 +104,7 @@ pub fn preview_entry(
     let format = detect_format(archive_path)?;
     match format {
         Format::Zip => {
-            let file = File::open(archive_path)?;
-            let mut zip = zip::ZipArchive::new(BufReader::new(file))?;
+            let mut zip = zip::ZipArchive::new(volume::open_reader(archive_path)?)?;
             for i in 0..zip.len() {
                 let (name, encrypted, size) = {
                     let f = zip.by_index_raw(i)?;
@@ -147,7 +146,14 @@ pub fn preview_entry(
                     .as_deref()
                     .map(Password::from)
                     .unwrap_or_else(Password::empty);
-                match ArchiveReader::open(archive_path, pw) {
+                let src = match volume::open_reader(archive_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        last = anyhow::anyhow!("{e}");
+                        continue;
+                    }
+                };
+                match ArchiveReader::new(src, pw) {
                     Ok(mut r) => {
                         let mut result: Option<Preview> = None;
                         let target = entry_path.to_string();
@@ -187,6 +193,9 @@ pub fn preview_entry(
             Err(last)
         }
         Format::Rar => {
+            // unrar 按路径工作：原生分卷给首卷，裸切分先合并到临时文件。
+            let native = volume::native_path(archive_path)?;
+            let archive_path = native.path();
             let mut cands: Vec<Option<String>> = vec![password.clone()];
             cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("条目不存在: {entry_path}");
@@ -230,7 +239,7 @@ pub fn preview_entry(
         }
         Format::Tar | Format::TarGz | Format::TarBz2 | Format::TarXz | Format::TarZst => {
             let r: Box<dyn Read + Send> = match format {
-                Format::Tar => Box::new(BufReader::new(File::open(archive_path)?)),
+                Format::Tar => Box::new(BufReader::new(volume::open_reader(archive_path)?)),
                 f => super::list::open_decompressor(archive_path, f)?,
             };
             let mut ar = tar::Archive::new(r);

@@ -173,7 +173,7 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     if app.get_webview_window("mini").is_some() {
         return Ok(());
     }
-    let r = tauri::WebviewWindowBuilder::new(
+    let mut b = tauri::WebviewWindowBuilder::new(
         app,
         "mini",
         tauri::WebviewUrl::App("index.html?mini=1".into()),
@@ -182,9 +182,32 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     .inner_size(480.0, 190.0)
     .resizable(false)
     .always_on_top(true)
-    .center()
-    .build();
-    r.map(|_| ()).map_err(|e| e.to_string())
+    .center();
+    // Windows：WebView2 首帧前默认底色是纯白，弹窗时会白闪一下；
+    // 改成贴近前端主题的背景色（深浅随系统）。窗口不能隐藏创建——
+    // visible:false 的新建小窗 WebView2 不跑 JS，无法由前端延迟显示。
+    #[cfg(target_os = "windows")]
+    {
+        b = b.background_color(theme_background(app));
+    }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// 小窗首帧前的窗口/WebView2 底色：贴近前端默认主题的 --bg，深浅随系统。
+/// （用户若强制与系统相反的深浅模式，首帧会有一瞬色差，但远好于纯白闪烁。）
+#[cfg(target_os = "windows")]
+fn theme_background(app: &tauri::AppHandle) -> tauri::window::Color {
+    use tauri::Manager;
+    let dark = app
+        .get_webview_window("main")
+        .and_then(|w| w.theme().ok())
+        .map(|t| t == tauri::Theme::Dark)
+        .unwrap_or(false);
+    if dark {
+        tauri::window::Color(17, 21, 34, 255)
+    } else {
+        tauri::window::Color(244, 247, 252, 255)
+    }
 }
 
 /// 创建「ask」小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
@@ -214,9 +237,7 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     };
     // Windows 上卡片铺满整窗、圆角与描边都交给 DWM（前端启动时调 set_window_border_color
     // 把描边染成卡片底色，见 winmat::apply_rounded_frame），故窗口保持不透明。
-    // 隐藏创建：Windows 上无装饰裸窗在 WebView2 首帧前会涂黑（黑闪），
-    // 故与主窗同款模式——前端渲染完首帧后再显示。
-    let win = tauri::WebviewWindowBuilder::new(
+    let mut b = tauri::WebviewWindowBuilder::new(
         app,
         "ask",
         tauri::WebviewUrl::App("index.html?ask=1".into()),
@@ -227,19 +248,13 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
     .resizable(true)
     .decorations(false)
     .transparent(cfg!(target_os = "macos"))
-    .visible(false)
-    .center()
-    .build()
-    .map_err(|e| e.to_string())?;
-    // 兜底：若前端异常（WebView2 延迟初始化 / JS 未跑），2 秒后强制显示，保证窗口不会永远不出现。
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        if !win.is_visible().unwrap_or(true) {
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
-    });
-    Ok(())
+    .center();
+    // 与迷你窗同理：用主题底色替代 WebView2 首帧前的默认白底，消除白闪。
+    #[cfg(target_os = "windows")]
+    {
+        b = b.background_color(theme_background(app));
+    }
+    b.build().map(|_| ()).map_err(|e| e.to_string())
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -253,6 +268,20 @@ fn err_str(e: anyhow::Error) -> String {
     } else {
         s
     }
+}
+
+/// 按内容确认一个文件是不是归档：读文件头/特征字段，认出来就返回格式标签。
+/// 前端先按扩展名判断（零 IO），名字看不出来时再问这里，避免把没后缀或后缀
+/// 写错的压缩包当成普通文件。不是归档返回 None，不算错误。
+#[tauri::command]
+async fn probe_archive(path: String) -> CmdResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::detect_format(&PathBuf::from(path))
+            .ok()
+            .map(|f| f.label().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1185,6 +1214,7 @@ pub fn run() {
         .manage(Arc::new(QuickLaunch::default()))
         .invoke_handler(tauri::generate_handler![
             list_archive,
+            probe_archive,
             extract_archive,
             create_archive,
             archive_add,

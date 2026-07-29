@@ -4,6 +4,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { api, fmtSize, newJobId, Progress } from "../api";
 import { UiIcon } from "../icons";
+import { explainError } from "../i18n";
 import { loadSettings } from "../settings";
 
 // 迷你进度窗口：快捷压缩（资源管理器右键 / 关联启动）的「可见」驱动方。
@@ -138,7 +139,7 @@ export function MiniProgress() {
         setDone(true);
         await new Promise((r) => setTimeout(r, 800));
       } else {
-        setError(lastErr || t(`task.failed.${label}`));
+        setError((lastErr && explainError(lastErr)) || t(`task.failed.${label}`));
         // 出错时多停留片刻让用户看到信息，随后由主窗接管报错。
         await new Promise((r) => setTimeout(r, 1800));
       }

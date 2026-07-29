@@ -90,6 +90,12 @@ export const zhCN = {
       remove: "删除失败：{{message}}",
       verify: "校验失败：{{message}}",
       dragOut: "拖出失败：{{message}}",
+      // 后端返回的哨兵错误，转成人话。
+      reason: {
+        missingVolumes: "分卷不完整，缺少：{{names}}。请把所有分卷放在同一个文件夹里。",
+        spannedZip: "暂不支持跨卷 ZIP（.z01 + .zip）。请先用其他工具合并成单个 .zip。",
+        splitReadonly: "分卷压缩包只读，无法增删其中的条目。",
+      },
     },
   },
   settings: {
