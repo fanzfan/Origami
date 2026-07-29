@@ -53,6 +53,8 @@ const COMMANDS: &[CmdDef] = &[
 const ARCHIVE_EXTS: &[&str] = &[
     ".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz", ".txz", ".zst", ".tzst",
     ".jar", ".apk",
+    // 分卷首卷：.001（裸切分）、.r00（老式 RAR）、.z01（跨卷 ZIP）。
+    ".001", ".r00", ".z01",
 ];
 
 fn is_archive(path: &str) -> bool {

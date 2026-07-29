@@ -6,7 +6,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
   api,
-  ARCHIVE_EXTS,
+  ARCHIVE_PICK_EXTS,
   ArchiveInfo,
   DirListing,
   isArchive,
@@ -31,6 +31,7 @@ import {
   ProgressModal,
   SettingsDialog,
 } from "./components/dialogs";
+import { explainError } from "./i18n";
 import { applySettings, applyWindowEffects, clampScale, loadSettings, saveSettings, SCALE_STEP } from "./settings";
 
 export interface Toast {
@@ -159,7 +160,7 @@ export default function App() {
           }
           toast("info", t("app.info.encryptedOpenCancelled"));
         } else {
-          toast("error", t("app.error.open", { message: msg }));
+          toast("error", t("app.error.open", { message: explainError(msg) }));
         }
       } finally {
         setLoading(false);
@@ -223,11 +224,23 @@ export default function App() {
   }, []);
 
   // ----- file drop & open-with -----
-  /** 落点为「初始界面 / 文件系统视图」时的规则：单个压缩包 → 打开；其余 → 新建压缩包。 */
+  /** 落点为「初始界面 / 文件系统视图」时的规则：单个压缩包 → 打开；其余 → 新建压缩包。
+   *  扩展名看不出来时再按内容确认一次，免得把没后缀 / 后缀写错的压缩包当成待压缩文件。 */
   const openOrCompress = useCallback(
-    (paths: string[]) => {
-      if (paths.length === 1 && isArchive(paths[0])) openArchive(paths[0]);
-      else if (paths.length > 0) setCreateFor(paths);
+    async (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (paths.length === 1) {
+        if (isArchive(paths[0])) {
+          openArchive(paths[0]);
+          return;
+        }
+        const probed = await api.probeArchive(paths[0]).catch(() => null);
+        if (probed) {
+          openArchive(paths[0]);
+          return;
+        }
+      }
+      setCreateFor(paths);
     },
     [openArchive],
   );
@@ -272,7 +285,7 @@ export default function App() {
           toast("info", t("common.cancelled"));
           return true;
         }
-        toast("error", t("app.error.compress", { message: msg }));
+        toast("error", t("app.error.compress", { message: explainError(msg) }));
         return false;
       } finally {
         if (!useMini) setJob(null);
@@ -304,7 +317,7 @@ export default function App() {
           openArchive(path);
           return true;
         }
-        toast("error", t("app.error.extract", { message: msg }));
+        toast("error", t("app.error.extract", { message: explainError(msg) }));
         return false;
       } finally {
         if (!useMini) setJob(null);
@@ -378,7 +391,7 @@ export default function App() {
   const pickArchive = useCallback(async () => {
     const sel = await openDialog({
       multiple: false,
-      filters: [{ name: t("app.dialog.archiveFilter"), extensions: ARCHIVE_EXTS }],
+      filters: [{ name: t("app.dialog.archiveFilter"), extensions: ARCHIVE_PICK_EXTS }],
     });
     if (typeof sel === "string") openArchive(sel);
   }, [openArchive, t]);
@@ -440,7 +453,7 @@ export default function App() {
               toast("error", t("app.error.extract", { message: String(e2) }));
             }
           }
-        } else toast("error", t("app.error.extract", { message: msg }));
+        } else toast("error", t("app.error.extract", { message: explainError(msg) }));
       } finally {
         setJob(null);
       }
@@ -462,7 +475,7 @@ export default function App() {
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", t("common.cancelled"));
-        else toast("error", t("app.error.compress", { message: msg }));
+        else toast("error", t("app.error.compress", { message: explainError(msg) }));
       } finally {
         setJob(null);
       }
@@ -486,7 +499,7 @@ export default function App() {
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", t("common.cancelled"));
-        else toast("error", t("app.error.add", { message: msg }));
+        else toast("error", t("app.error.add", { message: explainError(msg) }));
       } finally {
         setJob(null);
       }
@@ -506,7 +519,7 @@ export default function App() {
 
   // 拖入应用：已打开可编辑的压缩包 → 添加到当前包内目录；否则按初始界面的规则处理。
   // 只读格式（RAR 等）无法添加，退回「打开 / 新建压缩包」，不至于让拖放无声失败。
-  const addOnDrop = !!(archivePath && info && isEditableFormat(info.format));
+  const addOnDrop = !!(archivePath && info && isEditableFormat(info.format) && !info.volumes);
   const handleDrop = useCallback(
     (paths: string[]) => {
       if (paths.length === 0) return;
@@ -551,7 +564,7 @@ export default function App() {
           }
           return;
         }
-        toast("error", t("app.error.dragOut", { message: msg }));
+        toast("error", t("app.error.dragOut", { message: explainError(msg) }));
       }
     },
     [archivePath, password, encoding, askPassword, toast, t],
@@ -582,7 +595,7 @@ export default function App() {
       } catch (e) {
         const msg = String(e);
         if (msg === "CANCELLED") toast("info", t("common.cancelled"));
-        else toast("error", t("app.error.remove", { message: msg }));
+        else toast("error", t("app.error.remove", { message: explainError(msg) }));
       } finally {
         setJob(null);
       }
@@ -614,7 +627,7 @@ export default function App() {
               toast("error", t("app.error.open", { message: String(e2) }));
             }
           }
-        } else toast("error", t("app.error.open", { message: msg }));
+        } else toast("error", t("app.error.open", { message: explainError(msg) }));
       }
     },
     [archivePath, password, encoding, askPassword, toast, t],
@@ -630,7 +643,7 @@ export default function App() {
     } catch (e) {
       const msg = String(e);
       if (msg === "CANCELLED") toast("info", t("common.cancelled"));
-      else toast("error", t("app.error.verify", { message: msg }));
+      else toast("error", t("app.error.verify", { message: explainError(msg) }));
     } finally {
       setJob(null);
     }

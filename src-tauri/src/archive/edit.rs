@@ -51,6 +51,10 @@ fn edit(
     add: &[SourceFile],
     opts: &EditOptions,
 ) -> anyhow::Result<()> {
+    // 分卷包的增删要整包重切，语义与卷边界都难以保证，明确拒绝而不是写坏文件。
+    if super::volume::detect(archive_path).is_some_and(|s| s.is_split()) {
+        anyhow::bail!("SPLIT_ARCHIVE_READONLY");
+    }
     let format = detect_format(archive_path)?;
     match format {
         Format::Zip => edit_zip(ctx, archive_path, remove, add, opts),

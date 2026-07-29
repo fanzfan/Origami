@@ -200,14 +200,23 @@ const METHODS: Record<string, [string, string][]> = {
   ],
 };
 
+const MB = 1024 * 1024;
+
+// 预设分卷大小。CUSTOM 是哨兵值，选中后由旁边的输入框决定实际大小。
+const CUSTOM_VOLUME = -1;
 const VOLUMES: [number, string][] = [
   [0, "不分卷"],
-  [10 * 1024 * 1024, "10 MB"],
-  [100 * 1024 * 1024, "100 MB"],
-  [700 * 1024 * 1024, "700 MB"],
-  [1024 * 1024 * 1024, "1 GB"],
-  [4 * 1024 * 1024 * 1024 - 1, "FAT32 (4GB-1)"],
+  [10 * MB, "10 MB"],
+  [100 * MB, "100 MB"],
+  [700 * MB, "700 MB（CD）"],
+  [1024 * MB, "1 GB"],
+  [4480 * MB, "4.48 GB（DVD）"],
+  [4 * 1024 * MB - 1, "FAT32 上限（4 GB - 1）"],
+  [CUSTOM_VOLUME, "自定义…"],
 ];
+
+/** 后端下限：再小只会切出成千上万个碎片。与 create.rs 的 MIN_VOLUME_SIZE 保持一致。 */
+const MIN_VOLUME_KB = 64;
 
 export function CreateDialog(p: {
   sources: string[];
@@ -222,7 +231,15 @@ export function CreateDialog(p: {
   const [level, setLevel] = useState(p.defaultLevel ?? 6);
   const [password, setPassword] = useState("");
   const [volume, setVolume] = useState(0);
+  // 自定义分卷大小，单位 MB；仅当 volume === CUSTOM_VOLUME 时生效。
+  const [customMb, setCustomMb] = useState("50");
   const [dest, setDest] = useState("");
+
+  const customBytes = Math.round(Number(customMb) * MB);
+  const volumeSize = volume === CUSTOM_VOLUME ? customBytes : volume;
+  const volumeInvalid =
+    volume === CUSTOM_VOLUME &&
+    (!Number.isFinite(customBytes) || customBytes < MIN_VOLUME_KB * 1024);
 
   const fmt = FORMATS.find((f) => f.v === format)!;
   const sourceName = p.sources[0]?.split(/[\\/]/).pop() || p.sources[0] || "未命名项目";
@@ -241,7 +258,7 @@ export function CreateDialog(p: {
           <button className="btn" onClick={p.onCancel}>取消</button>
           <button
             className="btn primary"
-            disabled={!dest}
+            disabled={!dest || volumeInvalid}
             onClick={() =>
               p.onConfirm({
                 dest,
@@ -249,7 +266,7 @@ export function CreateDialog(p: {
                 level,
                 method: method || undefined,
                 password: fmt.enc && password ? password : undefined,
-                volumeSize: volume || undefined,
+                volumeSize: volumeSize > 0 ? volumeSize : undefined,
               })
             }
           >
@@ -320,6 +337,20 @@ export function CreateDialog(p: {
         </div>
       </div>
 
+      {volume === CUSTOM_VOLUME && (
+        <div className="field">
+          <label>每卷大小（MB）</label>
+          <input
+            type="number"
+            min={MIN_VOLUME_KB / 1024}
+            step={1}
+            value={customMb}
+            onChange={(e) => setCustomMb(e.target.value)}
+            placeholder="例如 50"
+          />
+        </div>
+      )}
+
       {METHODS[format] && (
         <div className="field">
           <label>算法</label>
@@ -362,7 +393,15 @@ export function CreateDialog(p: {
           />
         </div>
       )}
-      {volume > 0 && <div className="task-note">分卷输出为 .001 / .002 … 文件；解压时请选择 .001。</div>}
+      {volumeInvalid && (
+        <div className="task-note error-text">每卷至少 {MIN_VOLUME_KB} KB。</div>
+      )}
+      {volumeSize > 0 && !volumeInvalid && (
+        <div className="task-note">
+          分卷输出为 {defName}.{format}.001 / .002 … 每卷 {fmtSize(volumeSize)}。解压时选中任意一卷
+          即可，但所有分卷必须放在同一个文件夹里。
+        </div>
+      )}
     </Modal>
   );
 }

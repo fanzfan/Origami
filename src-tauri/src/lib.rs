@@ -270,6 +270,20 @@ fn err_str(e: anyhow::Error) -> String {
     }
 }
 
+/// 按内容确认一个文件是不是归档：读文件头/特征字段，认出来就返回格式标签。
+/// 前端先按扩展名判断（零 IO），名字看不出来时再问这里，避免把没后缀或后缀
+/// 写错的压缩包当成普通文件。不是归档返回 None，不算错误。
+#[tauri::command]
+async fn probe_archive(path: String) -> CmdResult<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        archive::detect_format(&PathBuf::from(path))
+            .ok()
+            .map(|f| f.label().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn list_archive(
     app: tauri::AppHandle,
@@ -1200,6 +1214,7 @@ pub fn run() {
         .manage(Arc::new(QuickLaunch::default()))
         .invoke_handler(tauri::generate_handler![
             list_archive,
+            probe_archive,
             extract_archive,
             create_archive,
             archive_add,

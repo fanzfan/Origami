@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DirListing, FsEntry, fmtDate, fmtSize, fsBreadcrumbs, isArchive } from "../api";
+import { api, DirListing, FsEntry, fmtDate, fmtSize, fsBreadcrumbs, isArchive } from "../api";
 import { FileIcon, UiIcon } from "../icons";
 import { PathBar } from "./PathBar";
 import { useDragOut } from "./useDragOut";
@@ -74,9 +74,13 @@ export function FileExplorer(p: Props) {
     });
   };
 
-  const onDouble = (row: FsEntry) => {
-    if (row.isDir) p.onNavigate(row.path);
-    else if (isArchive(row.path)) p.onOpenArchive(row.path);
+  const onDouble = async (row: FsEntry) => {
+    if (row.isDir) return p.onNavigate(row.path);
+    if (isArchive(row.path)) return p.onOpenArchive(row.path);
+    // 扩展名不像压缩包时按内容再确认一次：没后缀或后缀写错的包也能直接打开，
+    // 确实不是压缩包才交给系统默认程序。
+    const probed = await api.probeArchive(row.path).catch(() => null);
+    if (probed) p.onOpenArchive(row.path);
     else p.onOpenFile(row.path);
   };
 

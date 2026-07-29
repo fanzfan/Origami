@@ -1,7 +1,7 @@
-use super::{detect_format, inner_name, ArchiveInfo, Entry, Format};
+use super::volume;
+use super::{detect_format, inner_name, ArchiveInfo, Entry, Format, VolumeInfo};
 use crate::encoding::decode_name;
 use anyhow::Context;
-use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
@@ -28,6 +28,9 @@ pub fn list(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
     info.total_size = info.entries.iter().map(|e| e.size).sum();
     info.total_compressed = info.entries.iter().map(|e| e.compressed).sum();
     info.has_encrypted = info.entries.iter().any(|e| e.encrypted) || info.has_encrypted;
+    info.volumes = volume::detect(path)
+        .filter(|s| s.is_split())
+        .map(|s| VolumeInfo::from(&s));
     Ok(info)
 }
 
@@ -40,12 +43,13 @@ fn empty_info() -> ArchiveInfo {
         total_compressed: 0,
         comment: None,
         used_password: None,
+        volumes: None,
     }
 }
 
 fn list_zip(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
-    let file = File::open(path).context("打开文件失败")?;
-    let mut zip = zip::ZipArchive::new(BufReader::new(file)).context("不是有效的 ZIP 文件")?;
+    let reader = volume::open_reader(path).context("打开文件失败")?;
+    let mut zip = zip::ZipArchive::new(reader).context("不是有效的 ZIP 文件")?;
     let mut info = empty_info();
     let comment_raw = zip.comment().to_vec();
     if !comment_raw.is_empty() {
@@ -94,7 +98,9 @@ fn try_list_7z(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<Archiv
     use sevenz_rust2::{Archive, Password};
 
     let password = pw.as_deref().map(Password::from).unwrap_or_else(Password::empty);
-    match Archive::open_with_password(path, &password) {
+    // 走 volume reader：分卷（foo.7z.001…）会被拼成一条连续流。
+    let mut reader = volume::open_reader(path)?;
+    match Archive::read(&mut reader, &password) {
         Ok(archive) => {
             let mut info = empty_info();
             info.used_password = pw.clone();
@@ -189,6 +195,9 @@ fn try_list_rar(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<Archi
 }
 
 fn list_rar(path: &Path, opts: &ListOptions) -> anyhow::Result<ArchiveInfo> {
+    // unrar 只接受路径：原生分卷给首卷，裸切分先合并成临时文件。
+    let native = volume::native_path(path)?;
+    let path = native.path();
     if let Some(info) = try_list_rar(path, &opts.password)? {
         return Ok(info);
     }
@@ -236,7 +245,7 @@ fn tar_entries<R: std::io::Read>(mut ar: tar::Archive<R>, encoding: &str) -> any
 }
 
 fn list_tar(path: &Path, encoding: &str) -> anyhow::Result<ArchiveInfo> {
-    let f = BufReader::new(File::open(path)?);
+    let f = BufReader::new(volume::open_reader(path)?);
     let mut info = empty_info();
     info.entries = tar_entries(tar::Archive::new(f), encoding)?;
     Ok(info)
@@ -246,7 +255,7 @@ pub fn open_decompressor(
     path: &Path,
     format: Format,
 ) -> anyhow::Result<Box<dyn std::io::Read + Send>> {
-    let f = Box::new(BufReader::new(File::open(path)?));
+    let f = Box::new(BufReader::new(volume::open_reader(path)?));
     decompress_stream(f, format)
 }
 
@@ -277,7 +286,7 @@ fn list_single(path: &Path, _format: Format) -> anyhow::Result<ArchiveInfo> {
     info.entries.push(Entry {
         path: inner_name(path),
         size: 0, // unknown until decompressed
-        compressed: meta.len(),
+        compressed: volume::total_len(path)?,
         is_dir: false,
         mtime: meta
             .modified()
@@ -358,6 +367,79 @@ mod tests {
         let (_d, p) = write_temp("backup.zst", &zst);
         let info = list(&p, &opts()).unwrap();
         assert_eq!(info.format, "TAR.ZST");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    /// 把 `bytes` 按 `chunk` 切成 name.001/.002…，返回首卷路径。
+    fn write_split(name: &str, bytes: &[u8], chunk: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        for (i, part) in bytes.chunks(chunk).enumerate() {
+            std::fs::write(dir.path().join(format!("{name}.{:03}", i + 1)), part).unwrap();
+        }
+        let first = dir.path().join(format!("{name}.001"));
+        (dir, first)
+    }
+
+    // 分卷 ZIP（foo.zip.001/.002…）：拼接后应能正常识别格式并列出条目。
+    #[test]
+    fn lists_split_zip() {
+        let mut zw = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        zw.start_file::<_, ()>("dir/file.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(&vec![b'x'; 4096]).unwrap();
+        let bytes = zw.finish().unwrap().into_inner();
+
+        let chunk = 64;
+        let expected = bytes.len().div_ceil(chunk);
+        assert!(expected > 1, "样本太小，切不出多卷");
+        let (_d, first) = write_split("a.zip", &bytes, chunk);
+        let info = list(&first, &opts()).unwrap();
+        assert_eq!(info.format, "ZIP");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+        let v = info.volumes.expect("应识别为分卷");
+        assert_eq!(v.count, expected);
+        assert!(v.missing.is_empty());
+    }
+
+    // 分卷 tar.gz：从中间那一卷打开也应还原出完整内容。
+    #[test]
+    fn lists_split_tar_gz_from_middle_part() {
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&make_tar()).unwrap();
+        let bytes = gz.finish().unwrap();
+
+        let (dir, _) = write_split("b.tar.gz", &bytes, 64);
+        let middle = dir.path().join("b.tar.gz.002");
+        let info = list(&middle, &opts()).unwrap();
+        assert_eq!(info.format, "TAR.GZ");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    fn zip_bytes() -> Vec<u8> {
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        w.start_file::<_, ()>("dir/file.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"hello").unwrap();
+        w.finish().unwrap().into_inner()
+    }
+
+    // 扩展名骗人（zip 存成 .7z）时，按内容判定后应能正常列出，而不是报「不是有效的 7z」。
+    #[test]
+    fn lists_zip_named_7z() {
+        let (_d, p) = write_temp("mislabeled.7z", &zip_bytes());
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "ZIP");
+        assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
+    }
+
+    // 自解压包：前面挂了一段 stub，zip 从尾部的中央目录定位，仍能完整列出。
+    #[test]
+    fn lists_sfx_zip() {
+        let mut bytes = vec![0x4Du8, 0x5A];
+        bytes.extend(std::iter::repeat_n(0u8, 4096));
+        bytes.extend(zip_bytes());
+        let (_d, p) = write_temp("installer.exe", &bytes);
+        let info = list(&p, &opts()).unwrap();
+        assert_eq!(info.format, "ZIP");
         assert!(info.entries.iter().any(|e| e.path == "dir/file.txt"), "{:?}", info.entries);
     }
 

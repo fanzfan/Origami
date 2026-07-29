@@ -19,6 +19,7 @@ export type UiIconName =
   | "delete"
   | "up"
   | "lock"
+  | "layers"
   | "comment"
   | "folder"
   | "file";
@@ -88,6 +89,9 @@ export function UiIcon({ name, size = 16, className = "", ...props }: UiIconProp
       break;
     case "lock":
       paths = <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>;
+      break;
+    case "layers":
+      paths = <><path d="m12 3 8.5 4.5L12 12 3.5 7.5 12 3Z" /><path d="m4 12 8 4.2 8-4.2m-16 4.8 8 4.2 8-4.2" /></>;
       break;
     case "comment":
       paths = <path d="M4 4h16v13H9l-5 4z" />;

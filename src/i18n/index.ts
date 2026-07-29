@@ -38,6 +38,21 @@ i18n.use(initReactI18next).init({
   },
 });
 
+/**
+ * 把后端返回的哨兵错误翻成人话，其余原样返回。
+ * 后端只发稳定的标识（可带冒号后的参数），文案全部留在前端资源里。
+ */
+export function explainError(message: string): string {
+  if (message.startsWith("MISSING_VOLUMES:")) {
+    return i18n.t("app.error.reason.missingVolumes", {
+      names: message.slice("MISSING_VOLUMES:".length).trim(),
+    });
+  }
+  if (message === "SPANNED_ZIP_UNSUPPORTED") return i18n.t("app.error.reason.spannedZip");
+  if (message === "SPLIT_ARCHIVE_READONLY") return i18n.t("app.error.reason.splitReadonly");
+  return message;
+}
+
 export function applyLanguage(preference: AppLanguage) {
   const language = resolveLanguage(preference);
   document.documentElement.lang = language;

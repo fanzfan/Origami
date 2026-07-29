@@ -18,8 +18,10 @@ const ROOT: &str = "Software\\Classes";
 /// 加压缩菜单的目标类：所有文件、文件夹、文件夹背景（在文件夹空白处右键）。
 const TARGETS: &[&str] = &["*", "Directory", "Directory\\Background"];
 /// 加解压菜单的归档扩展名：挂到 SystemFileAssociations\.<ext> 下，只对压缩包显示。
+/// 末尾三个是分卷首卷（foo.7z.001 / foo.r00 / foo.z01）。
 const ARCHIVE_EXTS: &[&str] = &[
     "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst", "jar", "apk",
+    "001", "r00", "z01",
 ];
 /// 旧版本写入的级联父键名，卸载/重装时一并清除以便迁移。
 const LEGACY_KEYS: &[&str] = &["Origami", "Origami.Extract"];

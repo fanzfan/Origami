@@ -11,6 +11,20 @@ export interface Entry {
   crc: number | null;
 }
 
+/** 分卷类型：numeric = .001/.002 字节切分；其余为格式原生分卷。 */
+export type VolumeKind = "numeric" | "rarPart" | "rarOld" | "zipSpanned";
+
+export interface VolumeInfo {
+  kind: VolumeKind;
+  /** 现存卷数。 */
+  count: number;
+  totalSize: number;
+  /** 缺失的卷文件名，空表示完整。 */
+  missing: string[];
+  /** 首卷绝对路径。 */
+  first: string;
+}
+
 export interface ArchiveInfo {
   format: string;
   entries: Entry[];
@@ -19,6 +33,8 @@ export interface ArchiveInfo {
   totalCompressed: number;
   comment: string | null;
   usedPassword: string | null;
+  /** 分卷归档的概要；非分卷为 null。 */
+  volumes: VolumeInfo | null;
 }
 
 export interface Progress {
@@ -53,6 +69,9 @@ export interface RevealedPassword {
 }
 
 export const api = {
+  /** 按内容确认是不是归档：是则返回格式标签（"ZIP"…），不是返回 null。 */
+  probeArchive: (path: string) => invoke<string | null>("probe_archive", { path }),
+
   listArchive: (path: string, password?: string, encoding?: string) =>
     invoke<ArchiveInfo>("list_archive", { path, password, encoding }),
 
@@ -228,9 +247,23 @@ export const ARCHIVE_EXTS = [
   "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst", "jar", "apk",
 ];
 
+// 分卷文件名：foo.zip.001 / foo.001（裸切分）、foo.part1.rar、foo.r00、foo.z01。
+/** 文件选择框用：额外放行分卷首卷（foo.7z.001 / foo.r00 / foo.z01）。 */
+export const ARCHIVE_PICK_EXTS = [...ARCHIVE_EXTS, "001", "r00", "z01"];
+
+// 卷号统一按 3 位识别（.001…），避免把 report.2024 这类四位数字文件误判为分卷。
+const VOLUME_RE = /\.(\d{3}|part\d+\.rar|r\d{2}|z\d{2})$/i;
+
+/** 该路径是否是分卷压缩包的某一卷。 */
+export function isVolumePart(path: string): boolean {
+  return VOLUME_RE.test(path.toLowerCase());
+}
+
 export function isArchive(path: string): boolean {
   const lower = path.toLowerCase();
-  return ARCHIVE_EXTS.some((e) => lower.endsWith("." + e));
+  if (ARCHIVE_EXTS.some((e) => lower.endsWith("." + e))) return true;
+  // 分卷：foo.zip.001 这类去掉卷号后仍是压缩包；foo.001 这种无从判断，一并放行。
+  return isVolumePart(lower);
 }
 
 // 支持增删条目的格式（与后端 archive::edit 的能力一致）。RAR 等只读格式不在其中。

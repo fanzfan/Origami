@@ -15,6 +15,8 @@ class OrigamiFinderSyncExt: FIFinderSync {
     private static let archiveExts: Set<String> = [
         "zip", "jar", "apk", "7z", "rar", "tar",
         "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "zst", "tzst",
+        // 分卷首卷：001（裸切分）、r00（老式 RAR）、z01（跨卷 ZIP）。
+        "001", "r00", "z01",
     ]
 
     override init() {
