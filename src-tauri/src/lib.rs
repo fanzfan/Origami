@@ -562,6 +562,33 @@ async fn pw_reorder(app: tauri::AppHandle, ids: Vec<String>) -> CmdResult<()> {
     pw_blocking(app, move |a| passwords::reorder(a, &ids).map_err(err_str)).await
 }
 
+/// 导出全部密码到文本文件（明文，仅在用户主动导出且已过系统验证后调用）。
+/// `separator` 为空时按默认换行分隔。
+#[tauri::command]
+async fn pw_export(
+    app: tauri::AppHandle,
+    path: String,
+    separator: Option<String>,
+) -> CmdResult<passwords::ExportReport> {
+    pw_blocking(app, move |a| {
+        passwords::export_to_file(a, std::path::Path::new(&path), separator.as_deref()).map_err(err_str)
+    })
+    .await
+}
+
+/// 从文本文件导入密码；`separator` 为空时按默认换行分隔。
+#[tauri::command]
+async fn pw_import(
+    app: tauri::AppHandle,
+    path: String,
+    separator: Option<String>,
+) -> CmdResult<passwords::ImportReport> {
+    pw_blocking(app, move |a| {
+        passwords::import_from_file(a, std::path::Path::new(&path), separator.as_deref()).map_err(err_str)
+    })
+    .await
+}
+
 /// 当前平台是否提供可用的系统级身份验证（Touch ID / Windows Hello / 登录密码）。
 #[tauri::command]
 fn system_auth_available() -> bool {
@@ -1281,6 +1308,8 @@ pub fn run() {
             pw_add,
             pw_remove,
             pw_reorder,
+            pw_export,
+            pw_import,
             system_auth_available,
             system_auth,
             extract_entry_to_temp,

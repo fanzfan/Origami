@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -267,6 +267,126 @@ pub fn reorder(app: &tauri::AppHandle, order: &[String]) -> anyhow::Result<()> {
     let rank = |e: &IndexEntry| order.iter().position(|o| o == &e.id).unwrap_or(usize::MAX);
     idx.sort_by_key(rank);
     save_index(app, &idx)
+}
+
+// ---------------- 导入 / 导出 ----------------
+
+/// 导入/导出的默认分隔符：换行。
+pub const DEFAULT_SEPARATOR: &str = "\n";
+
+/// 导出结果统计。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportReport {
+    pub exported: usize,
+    /// 密码本身含分隔符，写出后无法再正确切分，跳过。
+    pub skipped: usize,
+}
+
+/// 导入结果统计。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+    pub added: usize,
+    /// 与已存在（或文件内前面出现过）的密码重复，跳过。
+    pub duplicated: usize,
+}
+
+/// 空分隔符视作未指定 → 用默认换行。
+fn effective_sep(sep: Option<&str>) -> &str {
+    match sep {
+        Some(s) if !s.is_empty() => s,
+        _ => DEFAULT_SEPARATOR,
+    }
+}
+
+/// 导出全部明文到文本文件。会读一次保险库（弹一次系统授权）。
+pub fn export_to_file(
+    app: &tauri::AppHandle,
+    path: &Path,
+    sep: Option<&str>,
+) -> anyhow::Result<ExportReport> {
+    let sep = effective_sep(sep);
+    let (idx, vault) = load_all(app);
+    let mut items = Vec::new();
+    let mut skipped = 0usize;
+    for e in idx {
+        let Some(pw) = vault.get(&e.id) else { continue };
+        if pw.contains(sep) || (sep == DEFAULT_SEPARATOR && pw.contains('\r')) {
+            skipped += 1;
+            continue;
+        }
+        items.push(pw.as_str());
+    }
+    let mut text = items.join(sep);
+    // 换行分隔时补一个行尾，符合文本文件习惯；自定义分隔符不追加，避免多出一个空项。
+    if sep == DEFAULT_SEPARATOR && !text.is_empty() {
+        text.push('\n');
+    }
+    fs::write(path, text)?;
+    // 明文文件，尽量收紧权限（仅本人可读写）；不支持的平台忽略。
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(ExportReport { exported: items.len(), skipped })
+}
+
+/// 解码导入文件：按 UTF-8 宽松解码并去掉 BOM。
+fn decode_text(raw: &[u8]) -> String {
+    let s = String::from_utf8_lossy(raw).into_owned();
+    s.strip_prefix('\u{feff}').map(str::to_string).unwrap_or(s)
+}
+
+/// 从文本文件导入密码：按分隔符切分，逐条去重后写入。整批只读写一次保险库。
+pub fn import_from_file(
+    app: &tauri::AppHandle,
+    path: &Path,
+    sep: Option<&str>,
+) -> anyhow::Result<ImportReport> {
+    let sep = effective_sep(sep);
+    let text = decode_text(&fs::read(path)?);
+    let parts: Vec<String> = if sep == DEFAULT_SEPARATOR {
+        // 兼容 CRLF：按 \n 切分后去掉行尾的 \r。
+        text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect()
+    } else {
+        text.split(sep).map(str::to_string).collect()
+    };
+    // 只丢弃纯空白项（首尾空格可能是密码的一部分，不做 trim）。
+    let list: Vec<String> = parts.into_iter().filter(|s| !s.trim().is_empty()).collect();
+    add_many(app, list)
+}
+
+/// 批量新增：按指纹去重（含批内自去重），只写一次索引与保险库。
+pub fn add_many(app: &tauri::AppHandle, list: Vec<String>) -> anyhow::Result<ImportReport> {
+    let (mut idx, mut vault) = load_all(app);
+    let mut seen: HashSet<String> = idx.iter().filter_map(|e| e.fp.clone()).collect();
+    let mut added = 0usize;
+    let mut duplicated = 0usize;
+    for pw in list {
+        let fp = fingerprint(&pw);
+        if !seen.insert(fp.clone()) {
+            duplicated += 1;
+            continue;
+        }
+        let id = new_id();
+        vault.insert(id.clone(), pw);
+        idx.push(IndexEntry {
+            id,
+            password: None,
+            fp: Some(fp),
+            label: None,
+            added_at: now(),
+            last_used: None,
+        });
+        added += 1;
+    }
+    if added > 0 {
+        write_vault(&vault)?;
+        save_index(app, &idx)?;
+    }
+    Ok(ImportReport { added, duplicated })
 }
 
 /// 候选密码，按列表（用户可拖动调整的）顺序尝试。只读一个保险库项 → 只弹一次授权。
