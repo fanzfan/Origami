@@ -886,7 +886,30 @@ export function FileAssociations(p: { onClose: () => void; toast: (kind: "ok" | 
     [list, desired, baseline],
   );
 
-  const setAll = (v: boolean) => setDesired(Object.fromEntries((list ?? []).map((r) => [r.ext, v])));
+  // 「全选」只作用于压缩格式：.001 之类别的切分工具也在用，接管与否得用户自己点。
+  const setAll = (v: boolean) =>
+    setDesired((d) => ({
+      ...d,
+      ...Object.fromEntries((list ?? []).filter((r) => r.kind === "archive").map((r) => [r.ext, v])),
+    }));
+
+  const archives = (list ?? []).filter((r) => r.kind === "archive");
+  const volumes = (list ?? []).filter((r) => r.kind === "volume");
+
+  const renderItem = (r: AssocEntry) => (
+    <label className="assoc-item" key={r.ext}>
+      <input
+        type="checkbox"
+        checked={desired[r.ext] ?? false}
+        onChange={(e) => setDesired((d) => ({ ...d, [r.ext]: e.target.checked }))}
+        style={{ width: "auto" }}
+      />
+      <span className="ext">.{r.ext}</span>
+      <span className="cur hint">
+        {r.associated ? "当前：Origami" : r.currentApp ? `当前：${r.currentApp}` : "当前：系统默认"}
+      </span>
+    </label>
+  );
 
   const apply = async () => {
     const toAssoc = (list ?? []).filter((r) => desired[r.ext] && !baseline[r.ext]).map((r) => r.ext);
@@ -930,21 +953,23 @@ export function FileAssociations(p: { onClose: () => void; toast: (kind: "ok" | 
           </div>
           <div className="assoc-list">
             {!list && <div className="hint">加载中…</div>}
-            {list?.map((r) => (
-              <label className="assoc-item" key={r.ext}>
-                <input
-                  type="checkbox"
-                  checked={desired[r.ext] ?? false}
-                  onChange={(e) => setDesired((d) => ({ ...d, [r.ext]: e.target.checked }))}
-                  style={{ width: "auto" }}
-                />
-                <span className="ext">.{r.ext}</span>
-                <span className="cur hint">
-                  {r.associated ? "当前：Origami" : r.currentApp ? `当前：${r.currentApp}` : "当前：系统默认"}
-                </span>
-              </label>
-            ))}
+            {archives.map(renderItem)}
           </div>
+
+          {volumes.length > 0 && (
+            <>
+              <p className="hint" style={{ margin: "4px 0 0" }}>
+                分卷首卷：<code>.001</code> 是按字节切分的第一卷，<code>.r00</code> /{" "}
+                <code>.z01</code> 分别是 RAR、ZIP 的分卷。双击首卷即可打开整套。
+                <br />
+                <span style={{ opacity: 0.7 }}>
+                  注意 <code>.001</code> 并非压缩格式专属，别的切分工具也在用；接管后这类文件都会由
+                  Origami 打开（不是压缩包时会明确提示）。
+                </span>
+              </p>
+              <div className="assoc-list">{volumes.map(renderItem)}</div>
+            </>
+          )}
           <p className="hint" style={{ opacity: 0.7, fontSize: 12, margin: 0 }}>
             {isWin
               ? "写入当前用户的注册表（HKCU），无需管理员权限；更改在重启资源管理器或重新登录后稳定生效。"

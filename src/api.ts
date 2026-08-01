@@ -203,6 +203,8 @@ export interface AssocEntry {
   ext: string;
   associated: boolean;
   currentApp: string | null;
+  /** "archive" = 压缩格式；"volume" = 分卷首卷（.001 / .r00 / .z01）。 */
+  kind: "archive" | "volume";
 }
 
 export interface FsEntry {
