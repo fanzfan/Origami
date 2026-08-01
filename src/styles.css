@@ -892,6 +892,11 @@ table.props td { padding: 6px 0; word-break: break-all; user-select: text; font-
 }
 .pwlist .pw-item .drag-handle:active { cursor: grabbing; }
 .pwlist .pw-item.dragging { opacity: 0.5; border-color: var(--accent); }
+/* 显示密码 / 分隔符一行；.grow 作为弹性占位把分隔符推到右侧 */
+.pw-io .grow { flex: 1; }
+.pw-io .sep-input { width: 96px; flex: none; text-align: center; }
+/* 导入 / 导出留在页脚左侧 */
+.modal footer .grow { flex: 1; }
 
 /* toast */
 .toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }

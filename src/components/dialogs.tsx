@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
 import { LANGUAGE_OPTIONS, type AppLanguage } from "../i18n";
 import { UiIcon, type UiIconName } from "../icons";
@@ -597,6 +598,7 @@ export function SettingsDialog(p: {
 // ---------------- Password prompt ----------------
 
 export function PasswordPrompt(p: { onSubmit: (pw: string | null) => void }) {
+  const { t } = useTranslation();
   const [pw, setPw] = useState("");
   const [save, setSave] = useState(true);
   const ref = useRef<HTMLInputElement>(null);
@@ -610,29 +612,29 @@ export function PasswordPrompt(p: { onSubmit: (pw: string | null) => void }) {
 
   return (
     <Modal
-      title="需要密码"
+      title={t("passwords.prompt.title")}
       onClose={() => p.onSubmit(null)}
       footer={
         <>
-          <button className="btn" onClick={() => p.onSubmit(null)}>取消</button>
-          <button className="btn primary" disabled={!pw} onClick={submit}>确定</button>
+          <button className="btn" onClick={() => p.onSubmit(null)}>{t("common.cancel")}</button>
+          <button className="btn primary" disabled={!pw} onClick={submit}>{t("passwords.prompt.confirm")}</button>
         </>
       }
     >
       <p className="hint" style={{ margin: 0 }}>
-        此归档已加密。已尝试密码管理器中保存的密码，均不匹配。
+        {t("passwords.prompt.hint")}
       </p>
       <input
         ref={ref}
         type="password"
         value={pw}
-        placeholder="输入密码"
+        placeholder={t("passwords.prompt.placeholder")}
         onChange={(e) => setPw(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
       />
       <label className="row" style={{ gap: 8 }}>
         <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} style={{ width: "auto" }} />
-        <span>保存到密码管理器，下次自动尝试</span>
+        <span>{t("passwords.prompt.save")}</span>
       </label>
     </Modal>
   );
@@ -642,13 +644,27 @@ export function PasswordPrompt(p: { onSubmit: (pw: string | null) => void }) {
 
 type AuthPhase = "checking" | "ready" | "denied";
 
-export function PasswordManager(p: { onClose: () => void }) {
+/** 分隔符输入框里的 \n \r \t \\ 按转义处理；留空 = 用后端默认（换行）。 */
+function parseSeparator(raw: string): string | undefined {
+  if (!raw) return undefined;
+  const map: Record<string, string> = { n: "\n", r: "\r", t: "\t", "\\": "\\" };
+  return raw.replace(/\\([nrt\\])/g, (_, c: string) => map[c]);
+}
+
+export function PasswordManager(p: {
+  onClose: () => void;
+  toast: (kind: "ok" | "error" | "info", text: string) => void;
+}) {
+  const { t } = useTranslation();
   const [list, setList] = useState<PwMeta[]>([]);
   // 明文按需加载：id -> 明文。仅当用户勾选「显示密码」时才向后端索取（届时才读凭据库）。
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [newPw, setNewPw] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [reveal, setReveal] = useState(false);
+  // 导入/导出的分隔符；留空即默认换行（每行一个密码）。
+  const [sep, setSep] = useState("");
+  const [ioBusy, setIoBusy] = useState(false);
   const [phase, setPhase] = useState<AuthPhase>("checking");
   // 正在拖动的条目 id（仅用于样式）。
   const [dragId, setDragId] = useState<string | null>(null);
@@ -680,6 +696,69 @@ export function PasswordManager(p: { onClose: () => void }) {
     setNewLabel("");
     refresh();
     if (reveal) toggleReveal(true);
+  };
+
+  // 导出：明文写入用户选定的文本文件（此处已过系统验证）。
+  const exportPasswords = async () => {
+    if (list.length === 0) {
+      p.toast("info", t("passwords.io.exportedEmpty"));
+      return;
+    }
+    const target = await saveDialog({
+      title: t("passwords.io.exportTitle"),
+      defaultPath: t("passwords.io.exportFileName"),
+      filters: [{ name: t("passwords.io.fileFilter"), extensions: ["txt"] }],
+    });
+    if (!target) return;
+    setIoBusy(true);
+    try {
+      const r = await api.pwExport(target, parseSeparator(sep));
+      p.toast(
+        "ok",
+        r.skipped > 0
+          ? t("passwords.io.exportedSkipped", { count: r.exported, skipped: r.skipped })
+          : t("passwords.io.exported", { count: r.exported }),
+      );
+    } catch (e) {
+      p.toast("error", t("passwords.io.exportFailed", { message: String(e) }));
+    } finally {
+      setIoBusy(false);
+    }
+  };
+
+  // 导入：按分隔符切分文本文件，重复的密码自动跳过。
+  const importPasswords = async () => {
+    const sel = await openDialog({
+      multiple: false,
+      title: t("passwords.io.importTitle"),
+      filters: [{ name: t("passwords.io.fileFilter"), extensions: ["txt"] }],
+    });
+    if (typeof sel !== "string") return;
+    setIoBusy(true);
+    try {
+      const r = await api.pwImport(sel, parseSeparator(sep));
+      if (r.added === 0) {
+        p.toast(
+          "info",
+          r.duplicated > 0
+            ? t("passwords.io.importedNone", { duplicated: r.duplicated })
+            : t("passwords.io.importedEmpty"),
+        );
+      } else {
+        p.toast(
+          "ok",
+          r.duplicated > 0
+            ? t("passwords.io.importedDuplicated", { count: r.added, duplicated: r.duplicated })
+            : t("passwords.io.imported", { count: r.added }),
+        );
+      }
+      refresh();
+      if (reveal) toggleReveal(true);
+    } catch (e) {
+      p.toast("error", t("passwords.io.importFailed", { message: String(e) }));
+    } finally {
+      setIoBusy(false);
+    }
   };
 
   // 拖动排序：用鼠标事件实现（WKWebView 对 HTML5 拖放支持不可靠，故不依赖 draggable）。
@@ -734,7 +813,7 @@ export function PasswordManager(p: { onClose: () => void }) {
         refresh();
         return;
       }
-      const ok = await api.systemAuth("查看已保存的归档密码");
+      const ok = await api.systemAuth(t("passwords.auth.reason"));
       if (ok) {
         setPhase("ready");
         refresh();
@@ -756,13 +835,13 @@ export function PasswordManager(p: { onClose: () => void }) {
   if (phase !== "ready") {
     return (
       <Modal
-        title="密码管理器"
+        title={t("passwords.title")}
         onClose={p.onClose}
         footer={
           <>
-            <button className="btn" onClick={p.onClose}>关闭</button>
+            <button className="btn" onClick={p.onClose}>{t("common.close")}</button>
             {phase === "denied" && (
-              <button className="btn primary" onClick={authenticate}>重试验证</button>
+              <button className="btn primary" onClick={authenticate}>{t("passwords.auth.retry")}</button>
             )}
           </>
         }
@@ -770,9 +849,9 @@ export function PasswordManager(p: { onClose: () => void }) {
         <div className="auth-gate">
           <div className="auth-icon">{phase === "denied" ? "🔒" : "🪪"}</div>
           {phase === "checking" ? (
-            <p>正在通过系统验证你的身份…<br /><span className="hint">请在弹出的系统对话框中使用指纹 / 面容 / 系统密码。</span></p>
+            <p>{t("passwords.auth.checking")}<br /><span className="hint">{t("passwords.auth.checkingHint")}</span></p>
           ) : (
-            <p>身份验证未通过，无法查看已保存的密码。<br /><span className="hint">出于安全考虑，需先通过系统验证。</span></p>
+            <p>{t("passwords.auth.denied")}<br /><span className="hint">{t("passwords.auth.deniedHint")}</span></p>
           )}
         </div>
       </Modal>
@@ -781,18 +860,29 @@ export function PasswordManager(p: { onClose: () => void }) {
 
   return (
     <Modal
-      title="密码管理器"
+      title={t("passwords.title")}
       wide
       onClose={p.onClose}
-      footer={<button className="btn primary" onClick={p.onClose}>完成</button>}
+      footer={
+        <>
+          <button className="btn" disabled={ioBusy} onClick={importPasswords}>
+            {t("passwords.io.import")}
+          </button>
+          <button className="btn" disabled={ioBusy || list.length === 0} onClick={exportPasswords}>
+            {t("passwords.io.export")}
+          </button>
+          <div className="grow" />
+          <button className="btn primary" onClick={p.onClose}>{t("common.done")}</button>
+        </>
+      }
     >
       <p className="hint" style={{ margin: 0 }}>
-        打开或解压加密归档时，会按下面的列表顺序尝试这些密码；可拖动左侧 ⇅ 调整顺序。
+        {t("passwords.hint")}
       </p>
       <div className="row">
         <input
           type={reveal ? "text" : "password"}
-          placeholder="新密码"
+          placeholder={t("passwords.newPassword")}
           value={newPw}
           onChange={(e) => setNewPw(e.target.value)}
           onKeyDown={(e) => {
@@ -804,7 +894,7 @@ export function PasswordManager(p: { onClose: () => void }) {
         />
         <input
           type="text"
-          placeholder="备注（可选）"
+          placeholder={t("passwords.labelPlaceholder")}
           value={newLabel}
           onChange={(e) => setNewLabel(e.target.value)}
           onKeyDown={(e) => {
@@ -815,15 +905,27 @@ export function PasswordManager(p: { onClose: () => void }) {
           }}
         />
         <button className="btn" disabled={!newPw} onClick={addPassword}>
-          添加
+          {t("passwords.add")}
         </button>
       </div>
-      <label className="row" style={{ gap: 8 }}>
-        <input type="checkbox" checked={reveal} onChange={(e) => toggleReveal(e.target.checked)} style={{ width: "auto" }} />
-        <span className="hint">显示密码</span>
-      </label>
+      <div className="row pw-io">
+        <label className="row" style={{ gap: 8 }}>
+          <input type="checkbox" checked={reveal} onChange={(e) => toggleReveal(e.target.checked)} style={{ width: "auto" }} />
+          <span className="hint">{t("passwords.reveal")}</span>
+        </label>
+        <div className="grow" />
+        <span className="hint">{t("passwords.io.separator")}</span>
+        <input
+          type="text"
+          className="sep-input"
+          placeholder={t("passwords.io.separatorPlaceholder")}
+          value={sep}
+          onChange={(e) => setSep(e.target.value)}
+        />
+      </div>
+      <p className="hint" style={{ margin: 0 }}>{t("passwords.io.hint")}</p>
       <div className="pwlist">
-        {list.length === 0 && <div className="hint">还没有保存的密码</div>}
+        {list.length === 0 && <div className="hint">{t("passwords.empty")}</div>}
         {list.map((e) => (
           <div
             className={`pw-item${dragId === e.id ? " dragging" : ""}`}
@@ -834,8 +936,8 @@ export function PasswordManager(p: { onClose: () => void }) {
           >
             <span
               className="drag-handle"
-              title="拖动调整顺序"
-              aria-label="拖动调整顺序"
+              title={t("passwords.dragToReorder")}
+              aria-label={t("passwords.dragToReorder")}
               onMouseDown={(ev) => startDrag(e.id, ev)}
             >
               ⇅
@@ -849,7 +951,7 @@ export function PasswordManager(p: { onClose: () => void }) {
                 refresh();
               }}
             >
-              删除
+              {t("passwords.remove")}
             </button>
           </div>
         ))}

@@ -794,7 +794,7 @@ export default function App() {
         />
       )}
 
-      {showPwMgr && <PasswordManager onClose={() => setShowPwMgr(false)} />}
+      {showPwMgr && <PasswordManager onClose={() => setShowPwMgr(false)} toast={toast} />}
 
       {showFinder && <ShellIntegration onClose={() => setShowFinder(false)} toast={toast} />}
 

@@ -68,6 +68,18 @@ export interface RevealedPassword {
   password: string;
 }
 
+// 导出结果：skipped 为密码本身含分隔符、无法安全写出而跳过的条数。
+export interface PwExportReport {
+  exported: number;
+  skipped: number;
+}
+
+// 导入结果：duplicated 为与已有密码重复而跳过的条数。
+export interface PwImportReport {
+  added: number;
+  duplicated: number;
+}
+
 export const api = {
   /** 按内容确认是不是归档：是则返回格式标签（"ZIP"…），不是返回 null。 */
   probeArchive: (path: string) => invoke<string | null>("probe_archive", { path }),
@@ -130,6 +142,12 @@ export const api = {
   pwAdd: (password: string, label?: string) => invoke<void>("pw_add", { password, label }),
   pwRemove: (id: string) => invoke<void>("pw_remove", { id }),
   pwReorder: (ids: string[]) => invoke<void>("pw_reorder", { ids }),
+  /** 导出全部密码到文本文件；separator 省略时按换行分隔。 */
+  pwExport: (path: string, separator?: string) =>
+    invoke<PwExportReport>("pw_export", { path, separator }),
+  /** 从文本文件导入密码；separator 省略时按换行分隔。 */
+  pwImport: (path: string, separator?: string) =>
+    invoke<PwImportReport>("pw_import", { path, separator }),
 
   systemAuthAvailable: () => invoke<boolean>("system_auth_available"),
   systemAuth: (reason: string) => invoke<boolean>("system_auth", { reason }),
