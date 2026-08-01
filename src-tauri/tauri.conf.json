@@ -65,6 +65,12 @@
         "name": "Archive",
         "description": "Compressed Archive",
         "role": "Viewer"
+      },
+      {
+        "ext": ["001", "r00", "z01"],
+        "name": "ArchiveVolume",
+        "description": "Split Archive Volume",
+        "role": "Viewer"
       }
     ]
   }

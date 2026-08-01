@@ -24,6 +24,17 @@ fn progid(ext: &str) -> String {
     format!("Origami.{ext}")
 }
 
+/// 资源管理器「类型」列显示的名字。分卷首卷不是压缩格式，单独措辞，
+/// 否则会显示成「Origami 001 压缩文件」这种读不通的东西。
+fn friendly_name(ext: &str) -> String {
+    match ext {
+        "001" => "Origami 分卷压缩文件".to_string(),
+        "r00" => "Origami RAR 分卷".to_string(),
+        "z01" => "Origami ZIP 分卷".to_string(),
+        _ => format!("Origami {} 压缩文件", ext.to_uppercase()),
+    }
+}
+
 /// 注册 ProgID 并把 `.ext` 默认打开程序设为它。
 ///
 /// `icon_path`：该格式专属图标（.ico）的绝对路径；为 None 时退回应用主图标
@@ -37,7 +48,7 @@ pub fn associate(ext: &str, icon_path: Option<&str>) -> Result<()> {
     let (prog, _) = hkcu
         .create_subkey(format!("{ROOT}\\{pid}"))
         .context("创建 ProgID 失败")?;
-    prog.set_value("", &format!("Origami {} 压缩文件", ext.to_uppercase()))?;
+    prog.set_value("", &friendly_name(ext))?;
     let (icon, _) = hkcu.create_subkey(format!("{ROOT}\\{pid}\\DefaultIcon"))?;
     // 专属图标用整图（索引 0 之外无其它资源），退回主图标时取 exe 的图标 0。
     let icon_val = match icon_path {

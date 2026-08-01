@@ -833,6 +833,10 @@ fn set_window_border_color(
 /// 可由本应用接管的压缩包扩展名（与 tauri.conf.json 的 fileAssociations 对齐）。
 const ASSOC_EXTS: &[&str] = &["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst"];
 
+/// 分卷首卷的扩展名。与上面分开列：`.001` 之类并非压缩格式专属，别的切分工具也在用，
+/// 所以界面上单独成组并加提示，让用户自己决定要不要接管，而不是跟着「全选」一起被勾上。
+const ASSOC_VOLUME_EXTS: &[&str] = &["001", "r00", "z01"];
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AssocEntry {
@@ -841,6 +845,8 @@ struct AssocEntry {
     associated: bool,
     /// 当前默认打开程序的标识（win: ProgID；mac: bundle id），仅供展示。
     current_app: Option<String>,
+    /// "archive" = 压缩格式；"volume" = 分卷首卷。前端据此分组展示。
+    kind: &'static str,
 }
 
 /// 当前平台是否支持运行时文件关联管理。
@@ -851,35 +857,41 @@ fn file_assoc_supported() -> bool {
 
 #[tauri::command]
 fn file_assoc_list() -> Vec<AssocEntry> {
-    ASSOC_EXTS
+    let all = ASSOC_EXTS
         .iter()
-        .map(|&ext| {
-            #[cfg(target_os = "macos")]
-            {
-                AssocEntry {
-                    ext: ext.to_string(),
-                    associated: macassoc::is_associated(ext),
-                    current_app: macassoc::current(ext),
-                }
+        .map(|&e| (e, "archive"))
+        .chain(ASSOC_VOLUME_EXTS.iter().map(|&e| (e, "volume")));
+    all.map(|(ext, kind)| {
+        #[cfg(target_os = "macos")]
+        {
+            AssocEntry {
+                ext: ext.to_string(),
+                associated: macassoc::is_associated(ext),
+                current_app: macassoc::current(ext),
+                kind,
             }
-            #[cfg(target_os = "windows")]
-            {
-                AssocEntry {
-                    ext: ext.to_string(),
-                    associated: winassoc::is_associated(ext),
-                    current_app: winassoc::current(ext),
-                }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            AssocEntry {
+                ext: ext.to_string(),
+                associated: winassoc::is_associated(ext),
+                current_app: winassoc::current(ext),
+                kind,
             }
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            {
-                AssocEntry {
-                    ext: ext.to_string(),
-                    associated: false,
-                    current_app: None,
-                }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let _ = kind;
+            AssocEntry {
+                ext: ext.to_string(),
+                associated: false,
+                current_app: None,
+                kind,
             }
-        })
-        .collect()
+        }
+    })
+    .collect()
 }
 
 #[tauri::command]
@@ -923,6 +935,47 @@ fn file_assoc_set(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod assoc_tests {
+    use super::*;
+
+    /// 关联列表里的每个分卷扩展名都必须是 `archive::volume` 真认得的，否则关联上去
+    /// 只会得到一个打不开的文件。往 ASSOC_VOLUME_EXTS 里加新扩展名时，这里会强制
+    /// 你同时补上对应的识别逻辑与样例。
+    #[test]
+    fn volume_assoc_exts_are_all_recognized() {
+        for &ext in ASSOC_VOLUME_EXTS {
+            let dir = tempfile::tempdir().unwrap();
+            // 按该扩展名造一套最小分卷，返回用户会双击的那个文件。
+            let picked = match ext {
+                "001" => {
+                    for n in ["a.7z.001", "a.7z.002"] {
+                        std::fs::write(dir.path().join(n), b"x").unwrap();
+                    }
+                    dir.path().join("a.7z.001")
+                }
+                "r00" => {
+                    for n in ["b.rar", "b.r00"] {
+                        std::fs::write(dir.path().join(n), b"x").unwrap();
+                    }
+                    dir.path().join("b.r00")
+                }
+                "z01" => {
+                    for n in ["c.zip", "c.z01"] {
+                        std::fs::write(dir.path().join(n), b"x").unwrap();
+                    }
+                    dir.path().join("c.z01")
+                }
+                other => panic!("ASSOC_VOLUME_EXTS 新增了 .{other}，请补上样例与 volume::detect 支持"),
+            };
+            let set = archive::volume::detect(&picked)
+                .unwrap_or_else(|| panic!(".{ext} 未被识别为分卷"));
+            assert!(set.is_split(), ".{ext} 应被认作分卷集合");
+            assert!(set.first.exists(), ".{ext} 的首卷路径应存在");
+        }
+    }
 }
 
 /// 为快速压缩计算默认输出路径：与源同目录、按选中内容命名、避免覆盖已有文件。
