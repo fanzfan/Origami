@@ -1,0 +1,87 @@
+# 发布安装包：打 v* 标签自动出草稿 Release；手动触发则只产出构建产物，便于验证流程。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 通用二进制（Apple Silicon + Intel）
+          - platform: macos-latest
+            name: macos-universal
+            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: "--target universal-apple-darwin --bundles app,dmg"
+            bundleGlob: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          # Windows x64 NSIS 安装包
+          - platform: windows-latest
+            name: windows-x64
+            rustTargets: x86_64-pc-windows-msvc
+            args: "--bundles nsis"
+            bundleGlob: src-tauri/target/release/bundle/nsis/*.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
+
+      # 缓存 Rust 依赖构建结果；首次构建仍需十几分钟（lto + codegen-units=1）。
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.name }}
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      # 标签发布时校验 tag 与 tauri.conf.json 的版本一致，避免产物名与 Release 名对不上。
+      - name: 校验版本号
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$conf" != "$tag" ]; then
+            echo "::error::标签 v$tag 与 tauri.conf.json 中的 $conf 不一致"
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        id: tauri
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # 非标签触发时 tagName 为空，tauri-action 只构建、不创建 Release。
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: Origami __VERSION__
+          releaseBody: |
+            安装包未做代码签名：macOS 首次打开需右键「打开」，Windows 会有 SmartScreen 提示。
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: 上传构建产物
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: origami-${{ matrix.name }}
+          path: ${{ matrix.bundleGlob }}
+          if-no-files-found: error
