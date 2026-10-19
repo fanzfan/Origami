@@ -17,14 +17,18 @@ npx tsc --noEmit                  # frontend typecheck; no linter/formatter is c
 cd src-tauri && cargo check
 ```
 
-Tests are Rust-only (there are no frontend tests). Run unit tests with `--lib`:
+Tests are Rust-only (there are no frontend tests):
 
 ```bash
-cd src-tauri && cargo test --lib                                     # archive/{mod,list,volume}.rs + lib.rs
+cd src-tauri && cargo test                                           # unit + integration tests
+cd src-tauri && cargo test --lib                                     # unit tests only: archive/{mod,list,volume}.rs + lib.rs
+cd src-tauri && cargo test --test engine                             # create/list/extract/edit round-trips per format
 cd src-tauri && cargo test --lib content_wins_over_wrong_extension   # one test, by name filter
 ```
 
-Plain `cargo test` (which also builds `tests/` and `examples/`) currently fails to compile, and that is not caused by your change: `tests/engine.rs` is stale (it builds `CreateOptions` without `exclude_junk` and passes `vec![]` where `LazyPasswords` is expected), and on non-macOS hosts `tests/services.rs` and `examples/install_services.rs` use the macOS-only `services` module without a cfg guard.
+- `tests/engine.rs` calls the `archive::*` functions directly with `tauri::test::mock_app()`. When you change `CreateOptions` / `ExtractOptions` / `ListOptions` or a function signature in `archive/`, update the helpers at the top of that file too; `cargo check` doesn't build tests and won't catch the drift.
+- `tests/services.rs` (Finder Quick Actions; it shells out to `plutil`) is `#![cfg(target_os = "macos")]` and runs 0 tests elsewhere.
+- On Windows, integration-test binaries need the Common Controls v6 manifest that tauri-build only embeds into bin targets. `build.rs` adds it to test targets; without it, the test exe dies at startup with `STATUS_ENTRYPOINT_NOT_FOUND` (`TaskDialogIndirect`).
 
 Packaging and platform extras:
 
