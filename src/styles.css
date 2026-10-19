@@ -704,12 +704,8 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
   line-height: 1.45;
 }
 
-/* ask 小窗使用同一套卡片与折纸蓝背景；无原生装饰，标题区负责拖动。 */
-:root[data-window="mini"] body {
-  background:
-    radial-gradient(circle at 88% -8%, color-mix(in srgb, var(--accent-alt) 12%, transparent), transparent 38%),
-    var(--bg);
-}
+/* 任务小窗无原生标题栏，整张卡片负责拖动，按钮保留正常交互。 */
+:root[data-window="mini"] body,
 :root[data-window="ask"] body { background: transparent; }
 [data-window="ask"] .overlay { background: transparent; align-items: stretch; padding: 12px; backdrop-filter: none; }
 [data-window="ask"] .modal {
@@ -728,7 +724,8 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
    卡片原来那样留白+描边时，不透明窗口的留白处透出的是网页底色，看着就是多出一层「怪边框」。
    卡片圆角须为 0：否则卡片自己的弯角与 DWM 的裁切之间会露出一小块底色。
    macOS 仍是透明窗 + 浮起卡片，不受影响。 */
-:root[data-platform="windows"][data-window="ask"] body { background: var(--bg-elev); }
+:root[data-platform="windows"][data-window="ask"] body,
+:root[data-platform="windows"][data-window="mini"] body { background: var(--bg-elev); }
 [data-platform="windows"][data-window="ask"] .overlay { padding: 0; }
 [data-platform="windows"][data-window="ask"] .modal {
   border: none;
@@ -736,7 +733,8 @@ table.files .lock .ui-icon { width: 13px; height: 13px; }
   box-shadow: none;
   background: var(--bg-elev);
 }
-[data-platform="windows"][data-window="ask"] .mini-progress {
+[data-platform="windows"][data-window="ask"] .mini-progress,
+[data-platform="windows"][data-window="mini"] .mini-progress {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -982,6 +980,10 @@ table.props td { padding: 6px 0; word-break: break-all; user-select: text; font-
 .mini-row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
 .mini-row .progress-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-progress-bottom .btn { flex: 0 0 auto; -webkit-app-region: no-drag; }
+.task-progress-detail { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; color: var(--text-dim); font-size: 12px; }
+.task-progress-detail.error-text { max-height: 64px; overflow: auto; color: var(--danger); }
+.task-progress-size { color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.task-progress .modal-icon svg { pointer-events: none; }
 .task-progress.has-error .progress-file { white-space: normal; }
 
 @media (max-width: 440px) {

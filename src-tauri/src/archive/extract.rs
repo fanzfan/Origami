@@ -513,7 +513,7 @@ fn extract_rar(
 
     // 用单个密码尝试解压：Ok(true)=成功，Ok(false)=密码错误，Err=致命错误。
     let attempt = |cand: &Option<String>| -> anyhow::Result<bool> {
-        let result = (|| -> Result<(), unrar::error::UnrarError> {
+        let result = (|| -> anyhow::Result<()> {
             let archive = match cand {
                 Some(p) => unrar::Archive::with_password(archive_path, p),
                 None => unrar::Archive::new(archive_path),
@@ -525,26 +525,44 @@ fn extract_rar(
                 }
                 let Some(cursor) = open.read_header()? else { break };
                 let name = cursor.entry().filename.to_string_lossy().replace('\\', "/");
-                if selected(&opts.entries, &name) {
-                    let size = cursor.entry().unpacked_size;
-                    t.set_file(&name);
-                    open = cursor.extract_with_base(&out_base)?;
-                    let _ = t.add(size);
-                } else {
+                if !selected(&opts.entries, &name) {
                     open = cursor.skip()?;
+                    continue;
                 }
+                let Some(rel) = sanitize_rel_path(&name) else {
+                    open = cursor.skip()?;
+                    continue;
+                };
+                let out_path = out_base.join(rel);
+                if cursor.entry().is_directory() {
+                    std::fs::create_dir_all(&out_path)?;
+                    open = cursor.skip()?;
+                    continue;
+                }
+                let size = cursor.entry().unpacked_size;
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                t.set_file(&name);
+                open = cursor.extract_to(&out_path)?;
+                let _ = t.add(size);
             }
             Ok(())
         })();
         match result {
             Ok(()) => Ok(true),
             Err(e) => {
-                use unrar::error::Code;
-                if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
-                    Ok(false)
-                } else {
-                    Err(anyhow::anyhow!("RAR 解压失败: {:?}", e.code))
+                if let Some(unrar_error) = e.downcast_ref::<unrar::error::UnrarError>() {
+                    use unrar::error::Code;
+                    if volume::is_missing_rar_volume(unrar_error) {
+                        return Err(anyhow::anyhow!("RAR_VOLUME_REQUIRED"));
+                    }
+                    if matches!(unrar_error.code, Code::MissingPassword | Code::BadPassword) {
+                        return Ok(false);
+                    }
+                    return Err(anyhow::anyhow!("RAR 解压失败: {:?}", unrar_error.code));
                 }
+                Err(e)
             }
         }
     };
@@ -763,7 +781,9 @@ pub fn test_archive(
                     }
                     Err(e) => {
                         use unrar::error::Code;
-                        if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
+                        if volume::is_missing_rar_volume(&e) {
+                            last = anyhow::anyhow!("RAR_VOLUME_REQUIRED");
+                        } else if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
                             last = anyhow::anyhow!("PASSWORD_REQUIRED");
                         } else {
                             last = anyhow::anyhow!("校验失败: {:?}", e.code);

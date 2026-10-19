@@ -49,6 +49,7 @@ export function explainError(message: string): string {
     });
   }
   if (message === "SPANNED_ZIP_UNSUPPORTED") return i18n.t("app.error.reason.spannedZip");
+  if (message === "RAR_VOLUME_REQUIRED") return i18n.t("app.error.reason.rarVolumeRequired");
   if (message === "SPLIT_ARCHIVE_READONLY") return i18n.t("app.error.reason.splitReadonly");
   return message;
 }

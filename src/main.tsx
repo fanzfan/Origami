@@ -32,10 +32,10 @@ if (isMini) document.documentElement.setAttribute("data-window", "mini");
 else if (isAsk) document.documentElement.setAttribute("data-window", "ask");
 else document.documentElement.setAttribute("data-window", "main");
 
-// Windows 的 ask 小窗：卡片铺满整窗，窗口边缘那圈 Win11 系统描边染成卡片底色即隐形，
+// Windows 的任务小窗：卡片铺满整窗，窗口边缘那圈 Win11 系统描边染成卡片底色即隐形，
 // 同时保住系统圆角（描边直接去掉会连圆角一起丢，详见 winmat::apply_rounded_frame）。
 // 须在 applySettings 之后取色，此时 data-mode / data-theme 已就位。
-if (isAsk && platform === "windows") {
+if ((isAsk || isMini) && platform === "windows") {
   const [r, g, b] = readThemeRgb("--bg-elev");
   import("./api").then(({ api }) => api.setWindowBorderColor(r, g, b)).catch(() => {});
 }

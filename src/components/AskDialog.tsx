@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { api, fmtSize, newJobId, PendingAction, Progress } from "../api";
-import { UiIcon } from "../icons";
+import { api, newJobId, PendingAction, Progress } from "../api";
 import { explainError } from "../i18n";
 import { loadSettings } from "../settings";
 import { CreateDialog, ExtractDialog } from "./dialogs";
+import { TaskProgress } from "./TaskProgress";
 
 // ask 小窗：处理需要交互的「压缩（详细设置…）」与「解压到…（选择位置）」。
 // 只渲染对应对话框；确认后就地跑任务并显示进度，队列处理完即关闭小窗（见 finishAskWindow）。
@@ -52,7 +52,7 @@ export function AskDialog() {
     let cancelled = false;
     const isStale = () => cancelled || seq !== resizeSeq.current;
     const s = loadSettings().scale;
-    const [w, h] = layout === "progress" ? [480, 220] : layout === "extract" ? [520, 430] : [520, 620];
+    const [w, h] = layout === "progress" ? [480, 190] : layout === "extract" ? [520, 430] : [520, 720];
     const tw = Math.min(Math.round(w * s), Math.max(320, window.screen.availWidth - 48));
     const th = Math.min(Math.round(h * s), Math.max(220, window.screen.availHeight - 48));
     const win = getCurrentWindow();
@@ -86,7 +86,7 @@ export function AskDialog() {
   // 进度事件 → 更新进度条。
   useEffect(() => {
     const un = api.onProgress((p) => {
-      jobRef.current = p.jobId;
+      if (p.jobId !== jobRef.current) return;
       setProg(p);
     });
     return () => {
@@ -121,6 +121,7 @@ export function AskDialog() {
 
   // 处理完当前项：清理状态，推进到下一项；没有更多则关窗收尾。
   const next = useCallback(() => {
+    jobRef.current = null;
     setProg(null);
     setBusy(null);
     setError(null);
@@ -132,8 +133,9 @@ export function AskDialog() {
   const runCreate = useCallback(
     async (
       sources: string[],
-      p: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number },
+      p: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number; threads?: number },
     ) => {
+      setProg(null);
       setBusy({ verb: "compress" });
       const jobId = newJobId();
       jobRef.current = jobId;
@@ -151,6 +153,7 @@ export function AskDialog() {
 
   const runExtract = useCallback(
     async (path: string, dest: string, smart: boolean) => {
+      setProg(null);
       setBusy({ verb: "extract" });
       const jobId = newJobId();
       jobRef.current = jobId;
@@ -173,43 +176,14 @@ export function AskDialog() {
 
   // 跑任务时显示进度（复用迷你窗样式）。
   if (busy) {
-    const pct = prog && prog.total > 0 ? Math.min(100, (prog.current / prog.total) * 100) : null;
     return (
-      <div className={`mini-progress task-progress ${error ? "has-error" : ""}`} data-tauri-drag-region>
-        <div className="task-progress-head" data-tauri-drag-region>
-          <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
-            <UiIcon name={busy.verb === "extract" ? "extract" : "archive"} size={20} />
-          </span>
-          <div className="task-progress-heading" data-tauri-drag-region>
-            <div className="modal-eyebrow">{t("task.execute")}</div>
-            <div className="mini-title">
-              {error ? t(`task.failed.${busy.verb}`) : t(`task.running.${busy.verb}`)}
-            </div>
-          </div>
-          <strong className="task-progress-percent">{error ? "!" : pct === null ? "—" : `${pct.toFixed(0)}%`}</strong>
-        </div>
-        <div className={`progressbar ${pct === null && !error ? "indeterminate" : ""}`}>
-          <div style={{ width: `${pct ?? 30}%` }} />
-        </div>
-        <div className="mini-row task-progress-bottom">
-          <span className={`progress-file ${error ? "error-text" : ""}`}>
-            {error
-              ? error
-              : prog
-                ? prog.total > 0
-                  ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
-                  : `${fmtSize(prog.current)} · ${prog.file}`
-                : t("common.preparing")}
-          </span>
-          {error ? (
-            <button className="btn sm" onClick={next}><UiIcon name="close" size={14} />{t("common.close")}</button>
-          ) : (
-            <button className="btn sm" onClick={() => jobRef.current && api.cancelJob(jobRef.current)}>
-              {t("common.cancel")}
-            </button>
-          )}
-        </div>
-      </div>
+      <TaskProgress
+        verb={busy.verb}
+        progress={prog}
+        error={error}
+        onClose={next}
+        onCancel={() => { if (jobRef.current) api.cancelJob(jobRef.current); }}
+      />
     );
   }
 

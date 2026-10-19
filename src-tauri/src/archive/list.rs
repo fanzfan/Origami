@@ -175,7 +175,8 @@ fn try_list_rar(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<Archi
                 is_dir: cursor.entry().is_directory(),
                 mtime: dos_to_unix(h.file_time),
                 encrypted: cursor.entry().is_encrypted(),
-                crc: Some(h.file_crc),
+                // 跨卷条目的初始头保存的是首段 CRC，不能当作完整文件 CRC 展示。
+                crc: if h.is_split() { None } else { Some(h.file_crc) },
             });
             open = cursor.skip()?;
         }
@@ -185,7 +186,9 @@ fn try_list_rar(path: &Path, pw: &Option<String>) -> anyhow::Result<Option<Archi
         Ok(info) => Ok(Some(info)),
         Err(e) => {
             use unrar::error::Code;
-            if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
+            if volume::is_missing_rar_volume(&e) {
+                Err(anyhow::anyhow!("RAR_VOLUME_REQUIRED"))
+            } else if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
                 Ok(None)
             } else {
                 Err(anyhow::anyhow!("打开 RAR 失败: {:?}", e.code))

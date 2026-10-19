@@ -10,6 +10,7 @@
 //!    `foo.z01` + `foo.zip`。每一片自带卷头，不能简单拼接。RAR 由 unrar 自己续卷，
 //!    我们只要把第一卷的路径交给它；ZIP 跨卷 zip 库不支持，识别出来给一句人话提示。
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,10 @@ pub enum VolumeKind {
     /// `foo.zip` + `foo.z01`……跨卷 ZIP，本程序暂不支持。
     ZipSpanned,
 }
+
+/// RAR 卷号可能来自损坏或恶意文件名；缺卷提示只保留有限条目，避免在错误消息中
+/// 分配/遍历数十亿个卷号。`VolumeInfo.missing` 因此可能是截断后的文件名列表。
+const MAX_REPORTED_RAR_MISSING: u32 = 32;
 
 impl VolumeKind {
     /// 该类型能否用 [`ConcatReader`] 直接拼接读取。
@@ -106,6 +111,13 @@ pub fn ensure_complete(set: &VolumeSet) -> anyhow::Result<()> {
     anyhow::bail!("MISSING_VOLUMES: {}", set.missing.join(", "))
 }
 
+/// unrar 在列表自动续卷或处理文件续卷时，以 `EOpen@Read/Process` 报告缺少尾卷；
+/// 此时目录扫描无法推断缺少的卷号，统一交给上层显示稳定错误标记。
+pub fn is_missing_rar_volume(error: &unrar::error::UnrarError) -> bool {
+    use unrar::error::{Code, When};
+    matches!((error.code, error.when), (Code::EOpen, When::Read | When::Process))
+}
+
 /// unrar 只能按路径打开。若 RAR 是裸切分（`foo.rar.001`），先合并到临时文件，
 /// 返回的 `TempPath` 在作用域结束时自动删除。
 pub fn materialize(path: &Path) -> anyhow::Result<Option<tempfile::TempPath>> {
@@ -143,10 +155,22 @@ impl NativePath {
 }
 
 pub fn native_path(path: &Path) -> anyhow::Result<NativePath> {
-    if let Some(tmp) = materialize(path)? {
-        return Ok(NativePath { path: tmp.to_path_buf(), _tmp: Some(tmp) });
+    let set = detect(path);
+    if let Some(set) = &set {
+        if matches!(set.kind, VolumeKind::RarPart | VolumeKind::RarOld) {
+            ensure_complete(&set)?;
+        }
     }
-    Ok(NativePath { path: entry_path(path), _tmp: None })
+    // 原生分卷直接复用本次检测的首卷，避免在同一个目录重复扫描三次。
+    if set.as_ref().is_some_and(|s| s.kind.concatenable()) {
+        if let Some(tmp) = materialize(path)? {
+            return Ok(NativePath { path: tmp.to_path_buf(), _tmp: Some(tmp) });
+        }
+    }
+    Ok(NativePath {
+        path: set.map(|s| s.first).unwrap_or_else(|| path.to_path_buf()),
+        _tmp: None,
+    })
 }
 
 // ---------------- 各类分卷的命名规则 ----------------
@@ -175,28 +199,122 @@ fn detect_numeric(dir: &Path, name: &str) -> Option<VolumeSet> {
 }
 
 /// `foo.partN.rar` / `foo.partNN.rar`（大小写不敏感）。
+///
+/// RAR 工具通常不会为未补零的卷号保持固定宽度（`part1`、`part2`、`part10`），
+/// 所以不能根据用户点中的那一卷直接格式化出 `part01`。这里扫描同目录下相同前缀
+/// 的卷名，按卷号排序后再推断中间缺失项。
 fn detect_rar_part(dir: &Path, name: &str) -> Option<VolumeSet> {
-    let lower = name.to_lowercase();
+    // 只折叠 ASCII 大小写，避免 Unicode lower-case 改变字节偏移，后面可以安全地用
+    // 原文件名切片生成逻辑路径。
+    let lower = name.to_ascii_lowercase();
     let rest = lower.strip_suffix(".rar")?;
     let idx = rest.rfind(".part")?;
-    let digits = &rest[idx + 5..];
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    let selected_digits = &rest[idx + 5..];
+    if selected_digits.is_empty() || !selected_digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let width = digits.len();
-    // 原名大小写保持不变，只替换卷号部分。
-    let head = &name[..idx + 5];
-    let tail = &name[name.len() - 4..];
-    let part_name = |i: u32| format!("{head}{i:0width$}{tail}", width = width);
-    let (parts, missing) = collect_sequence(dir, 1, &part_name);
-    let first = dir.join(part_name(1));
-    if !first.exists() {
-        return None;
+
+    let stem = &name[..idx];
+    let prefix = format!("{}.part", stem.to_ascii_lowercase());
+    let mut by_number: BTreeMap<u32, (PathBuf, String)> = BTreeMap::new();
+    for entry in std::fs::read_dir(dir).ok()? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let file_name = match entry.file_name().into_string() {
+            Ok(file_name) => file_name,
+            Err(_) => continue,
+        };
+        let lower_name = file_name.to_ascii_lowercase();
+        let Some(number_text) = lower_name
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(".rar"))
+        else {
+            continue;
+        };
+        if number_text.is_empty() || !number_text.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(number) = number_text.parse::<u32>() else {
+            continue;
+        };
+        if number == 0 {
+            continue;
+        }
+        by_number
+            .entry(number)
+            .or_insert_with(|| (entry.path(), file_name));
     }
+
+    let selected_number = selected_digits.parse::<u32>().ok()?;
+    // `read_dir` 的顺序不稳定；若大小写不同的重复文件存在，优先保留用户点中的那一卷。
+    let selected_path = dir.join(name);
+    if selected_path.is_file() {
+        by_number.insert(selected_number, (selected_path, name.to_string()));
+    }
+    let first = by_number
+        .get(&1)
+        .or_else(|| by_number.values().next())
+        .map(|(path, _)| path.clone())?;
+
+    let max_number = *by_number.keys().next_back()?;
+    let padded = by_number.values().any(|(_, n)| {
+        let lower = n.to_ascii_lowercase();
+        lower
+            .strip_prefix(&prefix)
+            .and_then(|s| s.strip_suffix(".rar"))
+            .is_some_and(|digits| digits.len() > 1 && digits.starts_with('0'))
+    });
+    let width = by_number
+        .values()
+        .filter_map(|(_, n)| {
+            let lower = n.to_ascii_lowercase();
+            lower
+                .strip_prefix(&prefix)
+                .and_then(|s| s.strip_suffix(".rar"))
+                .map(str::len)
+        })
+        .max()
+        .unwrap_or(selected_digits.len());
+    let missing_name = |number: u32| {
+        let digits = if padded {
+            format!("{number:0width$}", width = width)
+        } else {
+            number.to_string()
+        };
+        format!("{stem}.part{digits}.rar")
+    };
+    // 只沿现有卷号之间的间隙取前 N 个缺卷名；不遍历到 max_number，避免 part
+    // 后跟一个极大的恶意卷号时卡住。即使前 4096 卷齐全，最后一个间隙也会被找到。
+    let mut missing = Vec::new();
+    let mut candidate = 1u64;
+    for &number in by_number.keys() {
+        let number = number as u64;
+        while candidate < number && missing.len() < MAX_REPORTED_RAR_MISSING as usize {
+            missing.push(missing_name(candidate as u32));
+            candidate += 1;
+        }
+        candidate = number.saturating_add(1);
+        if missing.len() == MAX_REPORTED_RAR_MISSING as usize {
+            break;
+        }
+    }
+    while candidate <= max_number as u64 && missing.len() < MAX_REPORTED_RAR_MISSING as usize {
+        missing.push(missing_name(candidate as u32));
+        candidate += 1;
+    }
+    let parts = by_number
+        .into_values()
+        .map(|(path, _)| path)
+        .collect::<Vec<_>>();
     let total_size = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).sum();
     Some(VolumeSet {
         kind: VolumeKind::RarPart,
-        base: dir.join(format!("{}.rar", &name[..idx])),
+        base: dir.join(format!("{stem}.rar")),
         first,
         parts,
         total_size,
@@ -495,6 +613,118 @@ mod tests {
         assert_eq!(set.kind, VolumeKind::RarPart);
         assert_eq!(set.first, dir.path().join("d.part1.rar"));
         assert_eq!(set.base, dir.path().join("d.rar"));
+    }
+
+    #[test]
+    fn detects_unpadded_rar_parts_from_a_later_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 1..=10 {
+            std::fs::write(dir.path().join(format!("d.part{i}.rar")), b"x").unwrap();
+        }
+        let picked = dir.path().join("d.part10.rar");
+        let set = detect(&picked).unwrap();
+        assert_eq!(set.kind, VolumeKind::RarPart);
+        assert_eq!(set.first, dir.path().join("d.part1.rar"));
+        assert_eq!(
+            set.parts
+                .iter()
+                .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+            (1..=10)
+                .map(|i| format!("d.part{i}.rar"))
+                .collect::<Vec<_>>()
+        );
+        assert!(set.missing.is_empty());
+        assert_eq!(
+            native_path(&picked).unwrap().path(),
+            dir.path().join("d.part1.rar")
+        );
+    }
+
+    #[test]
+    fn reports_only_missing_rar_parts_between_existing_volumes() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["d.part1.rar", "d.part3.rar"] {
+            std::fs::write(dir.path().join(n), b"x").unwrap();
+        }
+        let set = detect(&dir.path().join("d.part3.rar")).unwrap();
+        assert_eq!(set.missing, vec!["d.part2.rar"]);
+        assert!(ensure_complete(&set)
+            .unwrap_err()
+            .to_string()
+            .contains("d.part2.rar"));
+    }
+
+    #[test]
+    fn missing_first_rar_part_is_reported_before_unrar() {
+        let dir = tempfile::tempdir().unwrap();
+        let picked = dir.path().join("d.part2.rar");
+        std::fs::write(&picked, b"x").unwrap();
+        let set = detect(&picked).unwrap();
+        assert_eq!(set.first, picked);
+        assert_eq!(set.missing, vec!["d.part1.rar"]);
+        let err = match native_path(&picked) {
+            Ok(_) => panic!("缺首卷时 native_path 应失败"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("MISSING_VOLUMES") && err.contains("d.part1.rar"));
+    }
+
+    #[test]
+    fn recognizes_only_missing_next_rar_volume_error() {
+        use unrar::error::{Code, UnrarError, When};
+
+        assert!(is_missing_rar_volume(&UnrarError::from(Code::EOpen, When::Process)));
+        assert!(!is_missing_rar_volume(&UnrarError::from(Code::EOpen, When::Open)));
+        assert!(!is_missing_rar_volume(&UnrarError::from(Code::ERead, When::Process)));
+    }
+
+    #[test]
+    fn bounds_missing_rar_part_report_for_large_volume_number() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("d.part1.rar"), b"x").unwrap();
+        let picked = dir.path().join("d.part4294967295.rar");
+        std::fs::write(&picked, b"x").unwrap();
+        let set = detect(&picked).unwrap();
+        assert_eq!(set.missing.len(), MAX_REPORTED_RAR_MISSING as usize);
+        assert_eq!(set.missing.first().unwrap(), "d.part2.rar");
+        assert_eq!(set.missing.last().unwrap(), "d.part33.rar");
+    }
+
+    #[test]
+    fn materializes_split_rar_fixture_before_native_processing() {
+        use base64::Engine;
+
+        // unrar crate 自带的真实 RAR（包含 VERSION = "unrar-0.4.0"），在测试中按
+        // 字节切成两卷，验证只能按路径工作的 unrar 仍能读回跨卷后的完整内容。
+        const RAR: &str = "UmFyIRoHAM+QcwAADQAAAAAAAAAPDHQggCcAFQAAAAsAAAADRfN9xqSKB0cdMwcApIEAAFZFUlNJT04MAI/sikXMI8hICINi/l/dXFOI8HLEPXsAQAcA";
+        let bytes = base64::engine::general_purpose::STANDARD.decode(RAR).unwrap();
+        let split_at = bytes.len() / 2;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("fixture.rar.001"), &bytes[..split_at]).unwrap();
+        std::fs::write(dir.path().join("fixture.rar.002"), &bytes[split_at..]).unwrap();
+
+        let native = native_path(&dir.path().join("fixture.rar.002")).unwrap();
+        assert_eq!(std::fs::read(native.path()).unwrap(), bytes);
+        let archive = unrar::Archive::new(native.path())
+            .open_for_processing()
+            .unwrap();
+        let cursor = archive.read_header().unwrap().unwrap();
+        assert_eq!(cursor.entry().filename, PathBuf::from("VERSION"));
+        let (data, _next) = cursor.read().unwrap();
+        assert_eq!(data, b"unrar-0.4.0");
+    }
+
+    #[test]
+    fn detects_zero_padded_rar_parts_case_insensitively() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["D.PART01.RAR", "D.PART02.RAR"] {
+            std::fs::write(dir.path().join(n), b"x").unwrap();
+        }
+        let set = detect(&dir.path().join("D.PART02.RAR")).unwrap();
+        assert_eq!(set.first, dir.path().join("D.PART01.RAR"));
+        assert_eq!(set.base, dir.path().join("D.rar"));
+        assert!(set.missing.is_empty());
     }
 
     #[test]

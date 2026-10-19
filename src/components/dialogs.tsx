@@ -18,6 +18,7 @@ function Modal(p: {
   footer?: React.ReactNode;
   onClose?: () => void;
 }) {
+  const { t } = useTranslation();
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +89,7 @@ function Modal(p: {
             </div>
           </div>
           {p.onClose && (
-            <button className="btn ghost modal-close" onClick={p.onClose} aria-label="关闭" title="关闭">
+            <button className="btn ghost modal-close" onClick={p.onClose} aria-label={t("common.close")} title={t("common.close")}>
               <UiIcon name="close" size={17} />
             </button>
           )}
@@ -110,6 +111,7 @@ export function ExtractDialog(p: {
   pickDir: () => Promise<string | null>;
   defaultDir: () => Promise<string>;
 }) {
+  const { t } = useTranslation();
   const [dest, setDest] = useState("");
   const [smart, setSmart] = useState(true);
   const archiveName = p.archivePath.split(/[\\/]/).pop() || p.archivePath;
@@ -121,18 +123,18 @@ export function ExtractDialog(p: {
 
   return (
     <Modal
-      title={p.entryCount > 0 ? `解压选中的 ${p.entryCount} 项` : "解压全部"}
-      eyebrow="解压归档"
-      description="选择目标位置，Origami 会保持目录结构清晰。"
+      title={p.entryCount > 0 ? t("extractDialog.selected", { count: p.entryCount }) : t("extractDialog.all")}
+      eyebrow={t("extractDialog.eyebrow")}
+      description={t("extractDialog.description")}
       icon="extract"
       className="task-dialog extract-dialog"
       onClose={p.onCancel}
       footer={
         <>
-          <button className="btn" onClick={p.onCancel}>取消</button>
+          <button className="btn" onClick={p.onCancel}>{t("common.cancel")}</button>
           <button className="btn primary" disabled={!dest} onClick={() => p.onConfirm(dest, smart)}>
             <UiIcon name="extract" size={15} />
-            开始解压
+            {t("extractDialog.start")}
           </button>
         </>
       }
@@ -140,15 +142,15 @@ export function ExtractDialog(p: {
       <div className="task-source" title={p.archivePath}>
         <span className="task-source-icon"><UiIcon name="file-archive" size={19} /></span>
         <span className="task-source-main">
-          <span className="task-source-label">来源归档</span>
+          <span className="task-source-label">{t("extractDialog.source")}</span>
           <strong>{archiveName}</strong>
           <span className="task-source-path">{p.archivePath}</span>
         </span>
       </div>
       <div className="field">
-        <label>解压到</label>
+        <label htmlFor="extract-dest">{t("extractDialog.destination")}</label>
         <div className="row path-picker">
-          <input type="text" value={dest} onChange={(e) => setDest(e.target.value)} />
+          <input id="extract-dest" type="text" value={dest} onChange={(e) => setDest(e.target.value)} />
           <button
             className="btn"
             onClick={async () => {
@@ -157,15 +159,15 @@ export function ExtractDialog(p: {
             }}
           >
             <UiIcon name="folder-open" size={15} />
-            浏览…
+            {t("extractDialog.browse")}
           </button>
         </div>
       </div>
       <label className="smart-option">
         <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} />
         <span className="smart-option-copy">
-          <strong>智能解压</strong>
-          <span>多个顶层文件时自动创建文件夹，避免文件散落。</span>
+          <strong>{t("extractDialog.smart")}</strong>
+          <span>{t("extractDialog.smartHint")}</span>
         </span>
       </label>
     </Modal>
@@ -175,29 +177,29 @@ export function ExtractDialog(p: {
 // ---------------- Create ----------------
 
 const FORMATS = [
-  { v: "zip", label: "ZIP", enc: true },
-  { v: "7z", label: "7Z", enc: true },
-  { v: "tar.gz", label: "TAR.GZ", enc: false },
-  { v: "tar.xz", label: "TAR.XZ", enc: false },
-  { v: "tar.bz2", label: "TAR.BZ2", enc: false },
-  { v: "tar.zst", label: "TAR.ZST", enc: false },
-  { v: "tar", label: "TAR", enc: false },
-];
+  { v: "zip", key: "zip", enc: true },
+  { v: "7z", key: "sevenZip", enc: true },
+  { v: "tar.gz", key: "tarGz", enc: false },
+  { v: "tar.xz", key: "tarXz", enc: false },
+  { v: "tar.bz2", key: "tarBz2", enc: false },
+  { v: "tar.zst", key: "tarZst", enc: false },
+  { v: "tar", key: "tar", enc: false },
+] as const;
 
 const METHODS: Record<string, [string, string][]> = {
   zip: [
-    ["", "Deflate（默认，兼容性最好）"],
-    ["bzip2", "BZip2"],
-    ["zstd", "Zstandard（快）"],
-    ["xz", "XZ/LZMA（高压缩率）"],
-    ["ppmd", "PPMd（文本最优）"],
+    ["", "default"],
+    ["bzip2", "bzip2"],
+    ["zstd", "zstd"],
+    ["xz", "xz"],
+    ["ppmd", "ppmd"],
   ],
   "7z": [
-    ["", "LZMA2（默认）"],
-    ["bzip2", "BZip2"],
-    ["zstd", "Zstandard（快）"],
-    ["ppmd", "PPMd（文本最优）"],
-    ["copy", "仅存储"],
+    ["", "default"],
+    ["bzip2", "bzip2"],
+    ["zstd", "zstd"],
+    ["ppmd", "ppmd"],
+    ["copy", "copy"],
   ],
 };
 
@@ -206,14 +208,14 @@ const MB = 1024 * 1024;
 // 预设分卷大小。CUSTOM 是哨兵值，选中后由旁边的输入框决定实际大小。
 const CUSTOM_VOLUME = -1;
 const VOLUMES: [number, string][] = [
-  [0, "不分卷"],
-  [10 * MB, "10 MB"],
-  [100 * MB, "100 MB"],
-  [700 * MB, "700 MB（CD）"],
-  [1024 * MB, "1 GB"],
-  [4480 * MB, "4.48 GB（DVD）"],
-  [4 * 1024 * MB - 1, "FAT32 上限（4 GB - 1）"],
-  [CUSTOM_VOLUME, "自定义…"],
+  [0, "none"],
+  [10 * MB, "tenMb"],
+  [100 * MB, "hundredMb"],
+  [700 * MB, "cdMb"],
+  [1024 * MB, "oneGb"],
+  [4480 * MB, "dvdGb"],
+  [4 * 1024 * MB - 1, "fat32"],
+  [CUSTOM_VOLUME, "custom"],
 ];
 
 /** 后端下限：再小只会切出成千上万个碎片。与 create.rs 的 MIN_VOLUME_SIZE 保持一致。 */
@@ -223,13 +225,23 @@ export function CreateDialog(p: {
   sources: string[];
   defaultLevel?: number;
   onCancel: () => void;
-  onConfirm: (opts: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number }) => void;
+  onConfirm: (opts: {
+    dest: string;
+    format: string;
+    level: number;
+    threads: number;
+    method?: string;
+    password?: string;
+    volumeSize?: number;
+  }) => void;
   pickDest: (defName: string, ext: string) => Promise<string | null>;
 }) {
-  const defName = (p.sources[0]?.split("/").pop() ?? "archive").replace(/\.[^.]+$/, "") || "archive";
+  const { t } = useTranslation();
+  const defName = (p.sources[0]?.split(/[\\/]/).pop() ?? "archive").replace(/\.[^.]+$/, "") || "archive";
   const [format, setFormat] = useState("zip");
   const [method, setMethod] = useState("");
   const [level, setLevel] = useState(p.defaultLevel ?? 6);
+  const [threads, setThreads] = useState(0);
   const [password, setPassword] = useState("");
   const [volume, setVolume] = useState(0);
   // 自定义分卷大小，单位 MB；仅当 volume === CUSTOM_VOLUME 时生效。
@@ -243,20 +255,37 @@ export function CreateDialog(p: {
     (!Number.isFinite(customBytes) || customBytes < MIN_VOLUME_KB * 1024);
 
   const fmt = FORMATS.find((f) => f.v === format)!;
-  const sourceName = p.sources[0]?.split(/[\\/]/).pop() || p.sources[0] || "未命名项目";
-  const levelLabel = level === 0 ? "仅存储" : level <= 3 ? "更快" : level <= 6 ? "均衡" : level < 9 ? "更小" : "最高";
+  const sourceName = p.sources[0]?.split(/[\\/]/).pop() || p.sources[0] || t("app.dialog.create.sourceUnknown");
+  const logicalThreads = Math.max(1, navigator.hardwareConcurrency || 1);
+  const maxThreads = Math.min(logicalThreads, 64);
+  const levelLabel = level === 0
+    ? t("app.dialog.create.level.store")
+    : level <= 3
+      ? t("app.dialog.create.level.fast")
+      : level <= 6
+        ? t("app.dialog.create.level.balanced")
+        : level < 9
+          ? t("app.dialog.create.level.small")
+          : t("app.dialog.create.level.highest");
+  const threadHint = format === "zip"
+    ? (password ? "app.dialog.create.threads.encryptedZip" : "app.dialog.create.threads.zip")
+    : format === "7z"
+      ? (method ? "app.dialog.create.threads.serial" : "app.dialog.create.threads.sevenZip")
+      : format === "tar.xz" || format === "tar.zst"
+        ? "app.dialog.create.threads.tarXzZst"
+        : "app.dialog.create.threads.serial";
 
   return (
     <Modal
-      title={`压缩 ${p.sources.length} 项`}
-      eyebrow="创建归档"
-      description="设置输出位置、格式与压缩参数。"
+      title={t("app.dialog.create.title", { count: p.sources.length })}
+      eyebrow={t("app.dialog.create.eyebrow")}
+      description={t("app.dialog.create.description")}
       icon="archive"
       className="task-dialog create-dialog"
       onClose={p.onCancel}
       footer={
         <>
-          <button className="btn" onClick={p.onCancel}>取消</button>
+          <button className="btn" onClick={p.onCancel}>{t("common.cancel")}</button>
           <button
             className="btn primary"
             disabled={!dest || volumeInvalid}
@@ -265,6 +294,7 @@ export function CreateDialog(p: {
                 dest,
                 format,
                 level,
+                threads,
                 method: method || undefined,
                 password: fmt.enc && password ? password : undefined,
                 volumeSize: volumeSize > 0 ? volumeSize : undefined,
@@ -272,7 +302,7 @@ export function CreateDialog(p: {
             }
           >
             <UiIcon name="archive" size={15} />
-            开始压缩
+            {t("app.dialog.create.start")}
           </button>
         </>
       }
@@ -282,18 +312,22 @@ export function CreateDialog(p: {
           <UiIcon name={p.sources.length > 1 ? "folder-archive" : "file-archive"} size={19} />
         </span>
         <span className="task-source-main">
-          <span className="task-source-label">待压缩{p.sources.length > 1 ? ` · ${p.sources.length} 项` : ""}</span>
+          <span className="task-source-label">
+            {p.sources.length > 1
+              ? t("app.dialog.create.sourceMultiple", { count: p.sources.length })
+              : t("app.dialog.create.source")}
+          </span>
           <strong>{sourceName}</strong>
           <span className="task-source-path">
-            {p.sources[0]}{p.sources.length > 1 ? ` · 另有 ${p.sources.length - 1} 项` : ""}
+            {p.sources[0]}{p.sources.length > 1 ? ` · ${t("app.dialog.create.sourceMore", { count: p.sources.length - 1 })}` : ""}
           </span>
         </span>
       </div>
 
       <div className="field">
-        <label>保存为</label>
+        <label>{t("app.dialog.create.saveAs")}</label>
         <div className="row path-picker">
-          <input type="text" value={dest} onChange={(e) => setDest(e.target.value)} placeholder="选择保存位置…" />
+          <input type="text" value={dest} onChange={(e) => setDest(e.target.value)} placeholder={t("app.dialog.create.chooseLocation")} />
           <button
             className="btn"
             onClick={async () => {
@@ -302,14 +336,14 @@ export function CreateDialog(p: {
             }}
           >
             <UiIcon name="folder-open" size={15} />
-            浏览…
+            {t("app.dialog.create.browse")}
           </button>
         </div>
       </div>
 
       <div className="row form-grid">
         <div className="field">
-          <label>格式</label>
+          <label>{t("app.dialog.create.format")}</label>
           <select
             value={format}
             onChange={(e) => {
@@ -321,17 +355,17 @@ export function CreateDialog(p: {
           >
             {FORMATS.map((f) => (
               <option key={f.v} value={f.v}>
-                {f.label}
+                {t(`app.dialog.create.formats.${f.key}`)}
               </option>
             ))}
           </select>
         </div>
         <div className="field">
-          <label>分卷</label>
+          <label>{t("app.dialog.create.volume")}</label>
           <select value={volume} onChange={(e) => setVolume(Number(e.target.value))}>
-            {VOLUMES.map(([v, l]) => (
+            {VOLUMES.map(([v, key]) => (
               <option key={v} value={v}>
-                {l}
+                {t(`app.dialog.create.volumes.${key}`)}
               </option>
             ))}
           </select>
@@ -340,25 +374,25 @@ export function CreateDialog(p: {
 
       {volume === CUSTOM_VOLUME && (
         <div className="field">
-          <label>每卷大小（MB）</label>
+          <label>{t("app.dialog.create.customVolumeLabel")}</label>
           <input
             type="number"
             min={MIN_VOLUME_KB / 1024}
             step={1}
             value={customMb}
             onChange={(e) => setCustomMb(e.target.value)}
-            placeholder="例如 50"
+            placeholder={t("app.dialog.create.customVolumePlaceholder")}
           />
         </div>
       )}
 
       {METHODS[format] && (
         <div className="field">
-          <label>算法</label>
+          <label>{t("app.dialog.create.method")}</label>
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
-            {METHODS[format].map(([v, l]) => (
+            {METHODS[format].map(([v, key]) => (
               <option key={v} value={v}>
-                {l}
+                {t(`app.dialog.create.methods.${format}.${key}`)}
               </option>
             ))}
           </select>
@@ -367,7 +401,7 @@ export function CreateDialog(p: {
 
       <div className="field level-field">
         <div className="field-label-row">
-          <label>压缩等级</label>
+          <label>{t("app.dialog.create.level.label")}</label>
           <span className="value-pill">{level === 0 ? "0" : level} · {levelLabel}</span>
         </div>
         <input
@@ -376,31 +410,51 @@ export function CreateDialog(p: {
           min={0}
           max={9}
           value={level}
-          aria-label="压缩等级"
+          aria-label={t("app.dialog.create.level.label")}
           style={{ "--range-progress": `${(level / 9) * 100}%` } as CSSProperties}
           onChange={(e) => setLevel(Number(e.target.value))}
         />
-        <div className="range-labels"><span>更快</span><span>更小</span></div>
+        <div className="range-labels">
+          <span>{t("app.dialog.create.level.fast")}</span>
+          <span>{t("app.dialog.create.level.small")}</span>
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="create-threads">{t("app.dialog.create.threads.label")}</label>
+        <select id="create-threads" value={threads} onChange={(e) => setThreads(Number(e.target.value))}>
+          <option value={0}>{t("app.dialog.create.threads.auto", { count: maxThreads })}</option>
+          {Array.from({ length: maxThreads }, (_, i) => i + 1).map((value) => (
+            <option key={value} value={value}>{value}</option>
+          ))}
+        </select>
+        <div className="hint">{t(threadHint)}</div>
       </div>
 
       {fmt.enc && (
         <div className="field">
-          <label>密码（可选，{format === "zip" ? "AES-256" : "AES-256 + 加密文件名"}）</label>
+          <label>
+            {t("app.dialog.create.password.label", {
+              encryption: t(`app.dialog.create.password.${format === "zip" ? "zip" : "sevenZip"}`),
+            })}
+          </label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="留空表示不加密"
+            placeholder={t("app.dialog.create.password.placeholder")}
           />
         </div>
       )}
       {volumeInvalid && (
-        <div className="task-note error-text">每卷至少 {MIN_VOLUME_KB} KB。</div>
+        <div className="task-note error-text">{t("app.dialog.create.volumeInvalid", { size: MIN_VOLUME_KB })}</div>
       )}
       {volumeSize > 0 && !volumeInvalid && (
         <div className="task-note">
-          分卷输出为 {defName}.{format}.001 / .002 … 每卷 {fmtSize(volumeSize)}。解压时选中任意一卷
-          即可，但所有分卷必须放在同一个文件夹里。
+          {t("app.dialog.create.volumeNote", {
+            pattern: `${defName}.${format}.001 / .002 …`,
+            size: fmtSize(volumeSize),
+          })}
         </div>
       )}
     </Modal>

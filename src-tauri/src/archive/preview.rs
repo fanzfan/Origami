@@ -227,6 +227,9 @@ pub fn preview_entry(
                     Ok(None) => anyhow::bail!("条目不存在: {entry_path}"),
                     Err(e) => {
                         use unrar::error::Code;
+                        if volume::is_missing_rar_volume(&e) {
+                            return Err(anyhow::anyhow!("RAR_VOLUME_REQUIRED"));
+                        }
                         if matches!(e.code, Code::MissingPassword | Code::BadPassword) {
                             last = anyhow::anyhow!("PASSWORD_REQUIRED");
                             continue;

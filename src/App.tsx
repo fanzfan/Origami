@@ -462,7 +462,7 @@ export default function App() {
   );
 
   const runCreate = useCallback(
-    async (p: { dest: string; format: string; level: number; method?: string; password?: string; volumeSize?: number }) => {
+    async (p: { dest: string; format: string; level: number; threads: number; method?: string; password?: string; volumeSize?: number }) => {
       const sources = createFor!;
       const jobId = newJobId();
       setCreateFor(null);

@@ -103,6 +103,7 @@ export const api = {
     sources: string[];
     format: string;
     level: number;
+    threads?: number;
     method?: string;
     password?: string;
     volumeSize?: number;

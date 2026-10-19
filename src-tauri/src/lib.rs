@@ -181,6 +181,8 @@ fn spawn_mini_window(app: &tauri::AppHandle) -> Result<(), String> {
     .title("Origami")
     .inner_size(480.0, 190.0)
     .resizable(false)
+    .decorations(false)
+    .transparent(cfg!(target_os = "macos"))
     .always_on_top(true)
     .center();
     // Windows：WebView2 首帧前默认底色是纯白，弹窗时会白闪一下；
@@ -232,7 +234,7 @@ fn spawn_ask_window(app: &tauri::AppHandle) -> Result<(), String> {
         if first_is_extract {
             (520.0, 430.0)
         } else {
-            (520.0, 620.0)
+            (520.0, 720.0)
         }
     };
     // Windows 上卡片铺满整窗、圆角与描边都交给 DWM（前端启动时调 set_window_border_color
@@ -360,6 +362,7 @@ async fn create_archive(
     password: Option<String>,
     volume_size: Option<u64>,
     exclude_junk: Option<bool>,
+    threads: Option<usize>,
 ) -> CmdResult<String> {
     let cancel = jobs.register(&job_id);
     let jobs2 = jobs.inner().clone();
@@ -370,6 +373,7 @@ async fn create_archive(
             job_id: jid,
             format,
             level,
+            threads: threads.unwrap_or(0),
             method: method.unwrap_or_default(),
             password,
             volume_size: volume_size.unwrap_or(0),

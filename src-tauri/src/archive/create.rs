@@ -11,6 +11,8 @@ pub struct CreateOptions {
     pub format: String,
     /// 0 (store) ..= 9 (best)
     pub level: u32,
+    /// 压缩线程数。0 表示自动；显式值会按本机逻辑核数和安全上限裁剪。
+    pub threads: usize,
     /// 压缩算法。zip: deflate(默认)/bzip2/zstd/xz/ppmd/store；
     /// 7z: lzma2(默认)/bzip2/zstd/ppmd/copy。空串 = 默认。
     pub method: String,
@@ -125,8 +127,36 @@ pub(crate) fn collect_sources(
     Ok(out)
 }
 
-fn worker_threads() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+const MAX_WORKER_THREADS: usize = 64;
+
+fn worker_threads(requested: usize) -> usize {
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, MAX_WORKER_THREADS);
+    if requested == 0 {
+        available
+    } else {
+        requested.clamp(1, available)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{worker_threads, MAX_WORKER_THREADS};
+
+    #[test]
+    fn worker_threads_normalizes_auto_and_explicit_values() {
+        let logical = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .clamp(1, MAX_WORKER_THREADS);
+
+        assert_eq!(worker_threads(0), logical);
+        assert_eq!(worker_threads(1), 1);
+        assert_eq!(worker_threads(2), logical.min(2));
+        assert_eq!(worker_threads(usize::MAX), logical);
+    }
 }
 
 pub fn create(
@@ -215,7 +245,7 @@ fn create_zip<R: tauri::Runtime>(
     files: &[SourceFile],
     opts: &CreateOptions,
 ) -> anyhow::Result<()> {
-    let threads = worker_threads();
+    let threads = worker_threads(opts.threads);
     // 加密时 AES 条目不宜 raw copy 合并，退回串行。
     if opts.password.is_some() || threads <= 1 {
         return create_zip_serial(t, dest, files, opts);
@@ -396,7 +426,7 @@ fn create_7z<R: tauri::Runtime>(
 
     let mut w = ArchiveWriter::create(dest).context("创建 7z 失败")?;
     let level = opts.level.clamp(0, 9);
-    let threads = worker_threads() as u32;
+    let threads = worker_threads(opts.threads) as u32;
     let mut methods: Vec<EncoderConfiguration> = Vec::new();
     if let Some(pw) = &opts.password {
         methods.push(AesEncoderOptions::new(Password::from(pw.as_str())).into());
@@ -449,7 +479,7 @@ fn create_tar<R: tauri::Runtime>(
 ) -> anyhow::Result<()> {
     let out = BufWriter::new(File::create(dest)?);
     let level = opts.level.clamp(0, 9);
-    let threads = worker_threads() as u32;
+    let threads = worker_threads(opts.threads) as u32;
     let w: Box<dyn Write> = match opts.format.as_str() {
         "tar" => Box::new(out),
         "tar.gz" => Box::new(flate2::write::GzEncoder::new(

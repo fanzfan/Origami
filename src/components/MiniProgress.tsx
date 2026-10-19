@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { api, fmtSize, newJobId, Progress } from "../api";
-import { UiIcon } from "../icons";
+import { api, newJobId, Progress } from "../api";
 import { explainError } from "../i18n";
 import { loadSettings } from "../settings";
+import { TaskProgress } from "./TaskProgress";
 
 // 迷你进度窗口：快捷压缩（资源管理器右键 / 关联启动）的「可见」驱动方。
 //
@@ -25,8 +25,8 @@ export function MiniProgress() {
   // 独立迷你窗也要跟随界面缩放；后端按 scale=1 创建，非默认缩放时在首帧精调。
   useLayoutEffect(() => {
     const scale = loadSettings().scale;
-    const width = Math.round(480 * scale);
-    const height = Math.round(190 * scale);
+    const width = Math.min(Math.round(480 * scale), Math.max(320, window.screen.availWidth - 48));
+    const height = Math.min(Math.round(190 * scale), Math.max(150, window.screen.availHeight - 48));
     const win = getCurrentWindow();
     (async () => {
       try {
@@ -47,7 +47,7 @@ export function MiniProgress() {
   // 进度事件 → 更新进度条。
   useEffect(() => {
     const un = api.onProgress((p) => {
-      jobRef.current = p.jobId;
+      if (p.jobId !== jobRef.current) return;
       setProg(p);
     });
     return () => {
@@ -79,13 +79,16 @@ export function MiniProgress() {
       setVerb(label);
 
       let ok = true;
+      let cancelled = false;
       let lastErr = "";
       // 遇到需要密码等交互的归档，转交主窗打开。
       const needMain: string[] = [];
 
       for (const a of creates) {
+        setVerb("compress");
         const jobId = newJobId();
         jobRef.current = jobId;
+        setProg(null);
         try {
           const dest = await api.defaultCreateDest(a.paths, a.format);
           await api.createArchive({
@@ -98,7 +101,9 @@ export function MiniProgress() {
           });
         } catch (e) {
           const msg = String(e);
-          if (msg !== "CANCELLED") {
+          if (msg === "CANCELLED") {
+            cancelled = true;
+          } else {
             ok = false;
             lastErr = msg;
           }
@@ -106,9 +111,11 @@ export function MiniProgress() {
       }
 
       for (const a of extracts) {
+        setVerb("extract");
         for (const path of a.paths) {
           const jobId = newJobId();
           jobRef.current = jobId;
+          setProg(null);
           try {
             const dest = await api.quickExtractDest(path, a.mode);
             // "smart" → 智能解压（多个顶层文件自动套一层文件夹）；"here"/"folder" → 原样。
@@ -117,7 +124,7 @@ export function MiniProgress() {
           } catch (e) {
             const msg = String(e);
             if (msg === "CANCELLED") {
-              // 用户主动取消，不算失败。
+              cancelled = true; // 用户主动取消，不算失败。
             } else if (msg === "PASSWORD_REQUIRED") {
               needMain.push(path); // 需要输入密码，交给主窗
             } else {
@@ -135,10 +142,10 @@ export function MiniProgress() {
         return;
       }
 
-      if (ok) {
+      if (ok && !cancelled) {
         setDone(true);
         await new Promise((r) => setTimeout(r, 800));
-      } else {
+      } else if (!ok) {
         setError((lastErr && explainError(lastErr)) || t(`task.failed.${label}`));
         // 出错时多停留片刻让用户看到信息，随后由主窗接管报错。
         await new Promise((r) => setTimeout(r, 1800));
@@ -147,54 +154,14 @@ export function MiniProgress() {
     })();
   }, []);
 
-  const pct = prog && prog.total > 0 ? Math.min(100, (prog.current / prog.total) * 100) : null;
-
   return (
-    <div className={`mini-progress task-progress ${error ? "has-error" : ""} ${done ? "is-done" : ""}`} data-tauri-drag-region>
-      <div className="task-progress-head" data-tauri-drag-region>
-        <span className="modal-icon" aria-hidden="true" data-tauri-drag-region>
-          <UiIcon name={done ? "verify" : verb === "extract" ? "extract" : "archive"} size={20} />
-        </span>
-        <div className="task-progress-heading" data-tauri-drag-region>
-          <div className="modal-eyebrow">{t("task.quick")}</div>
-          <div className="mini-title">
-            {error
-              ? t(`task.failed.${verb}`)
-              : done
-                ? t(`task.completed.${verb}`)
-                : t(`task.running.${verb}`)}
-          </div>
-        </div>
-        <strong className="task-progress-percent">
-          {error ? "!" : done ? "100%" : pct === null ? "—" : `${pct.toFixed(0)}%`}
-        </strong>
-      </div>
-      <div
-        className={`progressbar ${pct === null && !done && !error ? "indeterminate" : ""}`}
-      >
-        <div style={{ width: `${done ? 100 : pct ?? 30}%` }} />
-      </div>
-      <div className="mini-row task-progress-bottom">
-        <span className={`progress-file ${error ? "error-text" : ""}`}>
-          {error
-            ? error
-            : done
-              ? t("task.finished")
-              : prog
-                ? prog.total > 0
-                  ? `${pct!.toFixed(0)}% · ${fmtSize(prog.current)} / ${fmtSize(prog.total)} · ${prog.file}`
-                  : `${fmtSize(prog.current)} · ${prog.file}`
-                : t("common.preparing")}
-        </span>
-        {!done && !error && (
-          <button
-            className="btn sm"
-            onClick={() => jobRef.current && api.cancelJob(jobRef.current)}
-          >
-            {t("common.cancel")}
-          </button>
-        )}
-      </div>
-    </div>
+    <TaskProgress
+      verb={verb}
+      quick
+      progress={prog}
+      done={done}
+      error={error}
+      onCancel={() => { if (jobRef.current) api.cancelJob(jobRef.current); }}
+    />
   );
 }

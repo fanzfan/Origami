@@ -26,11 +26,25 @@ fn make_sources(dir: &Path) -> Vec<String> {
     ]
 }
 
+fn make_many_small_sources(dir: &Path) -> Vec<String> {
+    let root = dir.join("many-small-files");
+    fs::create_dir_all(&root).unwrap();
+    for i in 0..8 {
+        fs::write(
+            root.join(format!("file-{i}.txt")),
+            format!("small file {i}\n").repeat(8),
+        )
+        .unwrap();
+    }
+    vec![root.to_string_lossy().to_string()]
+}
+
 fn create_opts(format: &str, password: Option<&str>) -> CreateOptions {
     CreateOptions {
         job_id: "t".into(),
         format: format.into(),
         level: 6,
+        threads: 0,
         method: String::new(),
         password: password.map(String::from),
         volume_size: 0,
@@ -62,6 +76,16 @@ fn roundtrip(format: &str, ext: &str, password: Option<&str>) {
 }
 
 fn roundtrip_m(format: &str, ext: &str, password: Option<&str>, method: &str) {
+    roundtrip_mt(format, ext, password, method, 0);
+}
+
+fn roundtrip_mt(
+    format: &str,
+    ext: &str,
+    password: Option<&str>,
+    method: &str,
+    threads: usize,
+) {
     let app = tauri::test::mock_app();
     let handle = app.handle();
     let tmp = tempfile::tempdir().unwrap();
@@ -70,6 +94,7 @@ fn roundtrip_m(format: &str, ext: &str, password: Option<&str>, method: &str) {
 
     let mut copts = create_opts(format, password);
     copts.method = method.into();
+    copts.threads = threads;
     create(&ctx(handle), &dest, &sources, &copts).unwrap();
     assert!(dest.exists(), "{format}: archive not created");
 
@@ -140,6 +165,54 @@ fn tar_bz2_roundtrip() {
 #[test]
 fn plain_tar_roundtrip() {
     roundtrip("tar", "tar", None);
+}
+
+fn zip_thread_roundtrip(threads: usize) {
+    let app = tauri::test::mock_app();
+    let handle = app.handle();
+    let tmp = tempfile::tempdir().unwrap();
+    let sources = make_many_small_sources(tmp.path());
+    let dest = tmp.path().join(format!("threads-{threads}.zip"));
+    let mut opts = create_opts("zip", None);
+    opts.threads = threads;
+    create(&ctx(handle), &dest, &sources, &opts).unwrap();
+
+    let info = list(&dest, &list_opts(None)).unwrap();
+    for i in 0..8 {
+        let name = format!("many-small-files/file-{i}.txt");
+        assert!(
+            info.entries.iter().any(|entry| entry.path == name),
+            "ZIP threads={threads}: missing {name}"
+        );
+    }
+
+    let out = tmp.path().join("extracted");
+    fs::create_dir_all(&out).unwrap();
+    extract(&ctx(handle), &dest, &out, &extract_opts(None, false)).unwrap();
+    for i in 0..8 {
+        let path = out.join(format!("many-small-files/file-{i}.txt"));
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            format!("small file {i}\n").repeat(8),
+            "ZIP threads={threads}: content mismatch for file {i}"
+        );
+    }
+}
+
+#[test]
+fn zip_threads_one_and_two_roundtrip() {
+    for threads in [1, 2] {
+        zip_thread_roundtrip(threads);
+    }
+}
+
+#[test]
+fn threaded_7z_and_tar_roundtrips() {
+    for threads in [1, 2] {
+        roundtrip_mt("7z", "7z", None, "", threads);
+        roundtrip_mt("tar.xz", "tar.xz", None, "", threads);
+        roundtrip_mt("tar.zst", "tar.zst", None, "", threads);
+    }
 }
 
 #[test]
