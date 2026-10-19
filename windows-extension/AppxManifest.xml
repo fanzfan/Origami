@@ -15,13 +15,14 @@
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
-  IgnorableNamespaces="uap uap3 rescap com desktop4 desktop5">
+  IgnorableNamespaces="uap uap3 rescap com desktop4 desktop5 desktop6 uap10">
 
   <Identity
     Name="Origami.ShellExtension"
     Publisher="CN=Origami Local Signing"
-    Version="1.0.5.0"
+    Version="1.0.6.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
@@ -30,6 +31,9 @@
     <Logo>Assets\StoreLogo.png</Logo>
     <!-- 稀疏包：负载（DLL/exe/Assets）在 ExternalLocation，须显式允许外部内容。 -->
     <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+    <!-- 与 VS Code 的稀疏包一致，关闭写虚拟化，避免代理进程对注册表/文件的写入被重定向。 -->
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -100,5 +104,7 @@
   <!-- win32App（mediumIL 全信任）扩展必须声明 runFullTrust 受限能力。 -->
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
+    <!-- 上面关闭写虚拟化需要此受限能力。 -->
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>
