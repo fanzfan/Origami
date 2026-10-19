@@ -3,9 +3,9 @@
 # 前置：Windows 10/11、Rust(msvc 工具链)、Windows SDK（提供 makeappx/signtool）。
 # 用法（在已安装好的 Origami 上启用顶层新菜单）：
 #   1. 先安装 Origami（让 Origami.exe 落在某目录，例如
-#      "C:\Program Files\Origami\Origami.exe"）。
+#      "%LOCALAPPDATA%\Programs\Origami\Origami.exe"，NSIS 默认位置）。
 #   2. 以管理员或普通用户 PowerShell 运行：
-#        ./build.ps1 -AppDir "C:\Program Files\Origami"
+#        ./build.ps1 -AppDir "$env:LOCALAPPDATA\Programs\Origami"
 #   3. 重启资源管理器或注销重登。右键文件即见「用 Origami 压缩 ▸」。
 #
 # 这是开发/自用流程：用本机自签名证书签名并 sideload。分发给他人需用
@@ -27,7 +27,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # 带包标识的 COM 代理进程看不到 %LOCALAPPDATA% 下的普通目录（AppData 虚拟化；
 # Programs 子目录除外），外部位置放在那里会导致激活报 0x80070003、菜单不出现。
-# Tauri NSIS 默认装到 %LOCALAPPDATA%\Origami，正好踩中，需改装到 Programs 下。
+# NSIS 安装包已通过 src-tauri/windows/installer-hooks.nsh 默认装到 Programs\Origami。
 $appDirFull = [IO.Path]::GetFullPath($AppDir).TrimEnd('\')
 $localApp = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
 if ($appDirFull.StartsWith("$localApp\", "OrdinalIgnoreCase") -and

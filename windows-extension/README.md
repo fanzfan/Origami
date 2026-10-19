@@ -35,7 +35,7 @@ only write to the classic registry menu.
 3. Run:
    ```powershell
    cd windows-extension
-   ./build.ps1 -AppDir "C:\Program Files\Origami"
+   ./build.ps1 -AppDir "$env:LOCALAPPDATA\Programs\Origami"
    ```
 4. Restart Explorer: `Stop-Process -Name explorer -Force; Start-Process explorer`
 5. Right-click a file/folder → three compress commands appear at the top level; right-click a supported archive and two extract commands also appear.
@@ -54,9 +54,10 @@ Uninstall: `Get-AppxPackage *Origami.ShellExtension* | Remove-AppxPackage`
   verified on a device after registration.
 - `-AppDir` must not be a plain folder under `%LOCALAPPDATA%` (the `Programs` subfolder is
   fine): the package-identity COM surrogate can't see those paths, activation fails with
-  `0x80070003`, and the menu silently doesn't appear. The Tauri NSIS installer defaults to
-  `%LOCALAPPDATA%\Origami`, so install with `/D=%LOCALAPPDATA%\Programs\Origami` (or pick that
-  folder in the installer). `build.ps1` refuses such an `-AppDir`.
+  `0x80070003`, and the menu silently doesn't appear. `build.ps1` refuses such an `-AppDir`.
+  Tauri's own per-user default is `%LOCALAPPDATA%\Origami`, so `src-tauri/windows/installer-hooks.nsh`
+  redirects the NSIS installer to `%LOCALAPPDATA%\Programs\Origami` and silently uninstalls an
+  older install found at the old location.
 - Registration installs a signed `.msix` containing only the manifest and Assets; the DLL stays
   in `-AppDir` next to `Origami.exe`, which it launches. Loose
   `Add-AppxPackage -Register <manifest> -ExternalLocation` fails with `0x80073CF0`.

@@ -32,7 +32,7 @@ cd src-tauri && cargo test --lib content_wins_over_wrong_extension   # one test,
 
 Packaging and platform extras:
 
-- `npm run tauri build`: bundles per `src-tauri/tauri.conf.json` (`app`, `dmg`, `nsis`).
+- `npm run tauri build`: bundles per `src-tauri/tauri.conf.json` (`app`, `dmg`, `nsis`). The NSIS installer is per-user and installs to `%LOCALAPPDATA%\Programs\Origami`, not Tauri's default `%LOCALAPPDATA%\Origami` (`src-tauri/windows/installer-hooks.nsh`; the Win11 context-menu package can't load from the latter).
 - `npm run build:mac`: `.app` plus the embedded FinderSync extension (`finder-extension/build.sh`). Run `scripts/setup_local_signing.sh` once first; macOS won't load an ad-hoc-signed Finder extension, and the `.dmg` from `tauri build` doesn't contain it.
 - `pwsh -File build_windows_msix.ps1 [-SkipAppBuild] [-Register]`: Origami.exe + NSIS + the Win11 context-menu DLL + a self-signed sparse MSIX. `-Register` needs Developer Mode and admin.
 - `cd src-tauri && cargo run --example install_services [-- uninstall]`: install or remove the Finder Quick Actions by hand (macOS).
