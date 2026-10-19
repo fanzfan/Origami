@@ -3,9 +3,9 @@
 # 前置：Windows 10/11、Rust(msvc 工具链)、Windows SDK（提供 makeappx/signtool）。
 # 用法（在已安装好的 Origami 上启用顶层新菜单）：
 #   1. 先安装 Origami（让 Origami.exe 落在某目录，例如
-#      "C:\Program Files\Origami\Origami.exe"）。
+#      "%LOCALAPPDATA%\Programs\Origami\Origami.exe"，NSIS 默认位置）。
 #   2. 以管理员或普通用户 PowerShell 运行：
-#        ./build.ps1 -AppDir "C:\Program Files\Origami"
+#        ./build.ps1 -AppDir "$env:LOCALAPPDATA\Programs\Origami"
 #   3. 重启资源管理器或注销重登。右键文件即见「用 Origami 压缩 ▸」。
 #
 # 这是开发/自用流程：用本机自签名证书签名并 sideload。分发给他人需用
@@ -24,6 +24,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# 带包标识的 COM 代理进程看不到 %LOCALAPPDATA% 下的普通目录（AppData 虚拟化；
+# Programs 子目录除外），外部位置放在那里会导致激活报 0x80070003、菜单不出现。
+# NSIS 安装包已通过 src-tauri/windows/installer-hooks.nsh 默认装到 Programs\Origami。
+$appDirFull = [IO.Path]::GetFullPath($AppDir).TrimEnd('\')
+$localApp = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
+if ($appDirFull.StartsWith("$localApp\", "OrdinalIgnoreCase") -and
+    -not $appDirFull.StartsWith("$localApp\Programs\", "OrdinalIgnoreCase")) {
+  throw "AppDir 不能位于 %LOCALAPPDATA% 下（Programs 子目录除外）：$AppDir`n" +
+    "请把 Origami 装到例如 %LOCALAPPDATA%\Programs\Origami（NSIS 静默安装可加 /D=<目录>）。"
+}
 $target = "x86_64-pc-windows-msvc"
 
 Write-Host "› 编译 IExplorerCommand DLL…"
@@ -69,7 +80,15 @@ if (-not $cert) {
   Remove-Item $tmp -Force
 }
 
-# 可选：打成一个签名的 .msix 文件（稀疏包，含清单 + DLL + Assets，exe 为外部内容）。
+# 打成签名的稀疏 .msix：包内只有清单 + Assets；DLL 与 Origami.exe 都是外部内容，
+# 留在 AppDir。清单里的 DllPath / Executable 相对 ExternalLocation 解析，DLL 再按
+# 自身所在目录找 Origami.exe —— 若把 DLL 也打进包，它会被装进 WindowsApps，
+# 从那里找不到 Origami.exe。
+# 注册必须走这个 .msix：松散清单 `Add-AppxPackage -Register -ExternalLocation`
+# 会报 0x80073CF0（找不到 AppxManifest.xml）。
+if (-not $PackMsixTo -and -not $SkipRegister) {
+  $PackMsixTo = Join-Path $env:TEMP "Origami.ShellExtension.msix"
+}
 if ($PackMsixTo) {
   # 从 Windows SDK 找 makeappx / signtool（取版本号最高的一份）。
   function Find-SdkTool($name) {
@@ -80,12 +99,10 @@ if ($PackMsixTo) {
   $signtool = Find-SdkTool "signtool.exe"
   if (-not $makeappx -or -not $signtool) { throw "未找到 makeappx/signtool，请安装 Windows SDK。" }
 
-  # 只打包扩展负载（清单 + DLL + Assets），不含 Origami.exe（它是外部内容）。
   $stage = Join-Path $env:TEMP "origami-msix-stage"
   Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path "$stage/Assets" | Out-Null
   Copy-Item "$here/AppxManifest.xml" "$stage/AppxManifest.xml" -Force
-  Copy-Item $dll "$stage/origami_explorer_command.dll" -Force
   Copy-Item "$AppDir/Assets/*" "$stage/Assets/" -Force
 
   New-Item -ItemType Directory -Force -Path (Split-Path $PackMsixTo) | Out-Null
@@ -93,7 +110,7 @@ if ($PackMsixTo) {
   & $makeappx pack /d $stage /p $PackMsixTo /o /nv
   if ($LASTEXITCODE -ne 0) { throw "makeappx 打包失败。" }
   Write-Host "› 用 $CertSubject 签名 .msix…"
-  & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /t http://timestamp.digicert.com $PackMsixTo
+  & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint $PackMsixTo
   if ($LASTEXITCODE -ne 0) { throw "signtool 签名失败。" }
   Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
   Write-Host "✓ 已生成签名 .msix：$PackMsixTo"
@@ -105,10 +122,11 @@ if ($SkipRegister) {
   return
 }
 
-# 以「外部位置」方式注册稀疏包（开发模式，无需打成 .msix）。
-# 需要先开启开发者模式：设置 › 隐私和安全性 › 开发者选项 › 开发人员模式。
+# 以「外部位置」方式安装稀疏包。需要开发者模式（设置 › 隐私和安全性 › 开发者选项）。
+# 同版本号的包不能覆盖安装，先卸掉旧的。
+Get-AppxPackage Origami.ShellExtension | Remove-AppxPackage
 Write-Host "› 注册稀疏包（ExternalLocation = $AppDir）…"
-Add-AppxPackage -Register "$AppDir/AppxManifest.xml" -ExternalLocation $AppDir
+Add-AppxPackage -Path $PackMsixTo -ExternalLocation $AppDir
 
 Write-Host ""
 Write-Host "✓ 完成。重启资源管理器使其生效："

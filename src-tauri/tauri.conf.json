@@ -39,6 +39,11 @@
     "active": true,
     "targets": ["app", "dmg", "nsis"],
     "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    },
     "resources": {
       "icons/filetypes/zip.ico": "icons/filetypes/zip.ico",
       "icons/filetypes/7z.ico": "icons/filetypes/7z.ico",
