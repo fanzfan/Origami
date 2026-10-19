@@ -1,3 +1,6 @@
+//! Finder Quick Action 的安装测试。`services` 模块只在 macOS 编译，其它平台整个文件跳过。
+#![cfg(target_os = "macos")]
+
 use std::path::PathBuf;
 
 #[test]

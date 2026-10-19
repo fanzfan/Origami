@@ -1,6 +1,7 @@
 use origami_lib::archive::create::{create, CreateOptions};
 use origami_lib::archive::extract::{extract, test_archive, Ctx, ExtractOptions};
 use origami_lib::archive::list::{list, ListOptions};
+use origami_lib::passwords::LazyPasswords;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -33,6 +34,7 @@ fn create_opts(format: &str, password: Option<&str>) -> CreateOptions {
         method: String::new(),
         password: password.map(String::from),
         volume_size: 0,
+        exclude_junk: false,
     }
 }
 
@@ -40,7 +42,7 @@ fn extract_opts(password: Option<&str>, smart: bool) -> ExtractOptions {
     ExtractOptions {
         job_id: "t".into(),
         password: password.map(String::from),
-        fallback_passwords: vec![],
+        fallback_passwords: LazyPasswords::none(),
         encoding: "auto".into(),
         entries: vec![],
         smart,
@@ -51,7 +53,7 @@ fn list_opts(password: Option<&str>) -> ListOptions {
     ListOptions {
         password: password.map(String::from),
         encoding: "auto".into(),
-        fallback_passwords: vec![],
+        fallback_passwords: LazyPasswords::none(),
     }
 }
 
@@ -92,7 +94,7 @@ fn roundtrip_m(format: &str, ext: &str, password: Option<&str>, method: &str) {
     assert!(base.join("单独文件.md").exists(), "{format}: second source missing");
 
     // integrity test
-    test_archive(&ctx(handle), &dest, "t", password.map(String::from), vec![]).unwrap();
+    test_archive(&ctx(handle), &dest, "t", password.map(String::from), LazyPasswords::none()).unwrap();
 }
 
 #[test]
@@ -167,7 +169,7 @@ fn fallback_password_is_tried() {
     let out = tmp.path().join("x");
     fs::create_dir_all(&out).unwrap();
     let mut opts = extract_opts(None, true);
-    opts.fallback_passwords = vec!["nope".into(), "hidden".into()];
+    opts.fallback_passwords = LazyPasswords::new(|| vec!["nope".into(), "hidden".into()]);
     extract(&ctx(handle), &dest, &out, &opts).unwrap();
     assert!(out.join("out/数据目录/说明文件.txt").exists());
 }
@@ -189,6 +191,52 @@ fn selective_extract() {
     assert!(out.join("数据目录/子目录/data.bin").exists());
     assert!(!out.join("数据目录/说明文件.txt").exists());
     assert!(!out.join("单独文件.md").exists());
+}
+
+#[test]
+fn exclude_junk_skips_system_files() {
+    let app = tauri::test::mock_app();
+    let handle = app.handle();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("项目");
+    fs::create_dir_all(root.join("__MACOSX")).unwrap();
+    fs::write(root.join("__MACOSX/._a.txt"), "x").unwrap();
+    fs::write(root.join(".DS_Store"), "x").unwrap();
+    fs::write(root.join("Thumbs.db"), "x").unwrap();
+    fs::write(root.join("a.txt"), "keep").unwrap();
+    // 顶层直接传入的垃圾文件也要被跳过。
+    let stray = tmp.path().join(".DS_Store");
+    fs::write(&stray, "x").unwrap();
+    let sources = [
+        root.to_string_lossy().to_string(),
+        stray.to_string_lossy().to_string(),
+    ];
+
+    let names = |exclude_junk: bool, file: &str| -> Vec<String> {
+        let dest = tmp.path().join(file);
+        let mut opts = create_opts("zip", None);
+        opts.exclude_junk = exclude_junk;
+        create(&ctx(handle), &dest, &sources, &opts).unwrap();
+        list(&dest, &list_opts(None))
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|e| e.path)
+            .collect()
+    };
+
+    let kept = names(true, "clean.zip");
+    assert!(kept.iter().any(|p| p == "项目/a.txt"), "got {kept:?}");
+    assert!(
+        !kept.iter().any(|p| p.contains("__MACOSX") || p.contains(".DS_Store") || p.contains("Thumbs.db")),
+        "junk not excluded: {kept:?}"
+    );
+
+    // 关闭过滤时原样打包。
+    let all = names(false, "all.zip");
+    assert!(all.iter().any(|p| p.contains("__MACOSX")), "got {all:?}");
+    assert!(all.iter().any(|p| p == "项目/Thumbs.db"), "got {all:?}");
+    assert!(all.iter().any(|p| p == ".DS_Store"), "got {all:?}");
 }
 
 #[test]
@@ -250,7 +298,14 @@ fn volume_split_and_preview() {
         &create_opts("zip", None),
     )
     .unwrap();
-    let pv = origami_lib::archive::preview::preview_entry(&dest2, "hello.txt", None, vec![], "auto").unwrap();
+    let pv = origami_lib::archive::preview::preview_entry(
+        &dest2,
+        "hello.txt",
+        None,
+        LazyPasswords::none(),
+        "auto",
+    )
+    .unwrap();
     assert_eq!(pv.kind, "text");
     assert!(pv.text.unwrap().contains("预览内容"));
 }
