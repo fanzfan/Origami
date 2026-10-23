@@ -13,6 +13,7 @@ import { FileIcon, UiIcon } from "../icons";
 import { EntryProperties } from "./dialogs";
 import { PathBar } from "./PathBar";
 import { useDragOut } from "./useDragOut";
+import { useVirtualRows } from "./useVirtualRows";
 
 const VOLUME_KIND_LABEL: Record<VolumeKind, string> = {
   numeric: "按字节切分（.001 / .002 …）",
@@ -153,6 +154,9 @@ export function Browser(p: Props) {
     });
     return all;
   }, [p.info, cwd, search, sortKey, sortAsc]);
+
+  const hasParentRow = Boolean((cwd || p.onNavigateFs) && !search);
+  const virtual = useVirtualRows(rows.length, `${p.archivePath}\0${cwd}\0${search}`, hasParentRow);
 
   // 压缩包所在真实文件夹（用于把路径栏拼成「真实路径 › 压缩包 › 内部目录」）。
   const archiveParent = useMemo(() => splitParent(p.archivePath), [p.archivePath]);
@@ -427,10 +431,22 @@ export function Browser(p: Props) {
         }
       />
 
-      <div className="filelist">
-        <table className="files">
-          <thead>
-            <tr>
+      <div
+        className="filelist"
+        ref={virtual.containerRef}
+        data-total-rows={rows.length}
+        data-virtualized="true"
+      >
+        <table className="files" aria-rowcount={rows.length + 1 + Number(hasParentRow)}>
+          <colgroup>
+            <col />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 64 }} />
+            <col style={{ width: 140 }} />
+          </colgroup>
+          <thead ref={virtual.headerRef}>
+            <tr aria-rowindex={1}>
               <th onClick={() => clickSort("name")}>名称{sortIcon("name")}</th>
               <th onClick={() => clickSort("size")} style={{ width: 90, textAlign: "right" }}>
                 大小{sortIcon("size")}
@@ -445,8 +461,15 @@ export function Browser(p: Props) {
             </tr>
           </thead>
           <tbody>
-            {(cwd || p.onNavigateFs) && !search && (
-              <tr onDoubleClick={goUp}>
+            {hasParentRow && (
+              <tr
+                ref={virtual.fixedRowRef}
+                className="file-parent-row"
+                data-entry-path={cwd ? cwd.includes("/") ? cwd.slice(0, cwd.lastIndexOf("/")) : "" : archiveParent.parent}
+                data-row-index={-1}
+                aria-rowindex={2}
+                onDoubleClick={goUp}
+              >
                 <td className="name">
                   <span className="icon"><UiIcon name="up" size={18} /></span>
                   <span>{cwd ? ".." : ".. (返回上级文件夹)"}</span>
@@ -457,12 +480,21 @@ export function Browser(p: Props) {
                 <td />
               </tr>
             )}
-            {rows.map((r) => {
+            {virtual.topPadding > 0 && (
+              <tr className="virtual-spacer" aria-hidden="true">
+                <td colSpan={5} style={{ height: virtual.topPadding }} />
+              </tr>
+            )}
+            {rows.slice(virtual.startIndex, virtual.endIndex).map((r, offset) => {
+              const rowIndex = virtual.startIndex + offset;
               const ratio = ratioOf(r);
               return (
                 <tr
                   key={r.path}
-                  className={selected.has(r.path) ? "sel" : ""}
+                  className={`virtual-row${selected.has(r.path) ? " sel" : ""}`}
+                  data-entry-path={r.path}
+                  data-row-index={rowIndex}
+                  aria-rowindex={rowIndex + 2 + Number(hasParentRow)}
                   onMouseDown={(e) => armDragOut(r.path, e)}
                   onClick={(e) => toggleSelect(r, e)}
                   onDoubleClick={() => onDouble(r)}
@@ -482,6 +514,11 @@ export function Browser(p: Props) {
                 </tr>
               );
             })}
+            {virtual.bottomPadding > 0 && (
+              <tr className="virtual-spacer" aria-hidden="true">
+                <td colSpan={5} style={{ height: virtual.bottomPadding }} />
+              </tr>
+            )}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} style={{ textAlign: "center", padding: 30, color: "var(--text-dim)" }}>

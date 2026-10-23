@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 
 import { useTranslation } from "react-i18next";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { api, AssocEntry, fmtDate, fmtSize, Preview, PwMeta } from "../api";
-import { LANGUAGE_OPTIONS, type AppLanguage } from "../i18n";
+import { explainError, LANGUAGE_OPTIONS, type AppLanguage } from "../i18n";
 import { UiIcon, type UiIconName } from "../icons";
 import type { JobState } from "../App";
 import { ACRYLIC_OPACITY_MAX, ACRYLIC_OPACITY_MIN, FONTS, MATERIALS, MODES, SCALE_MAX, SCALE_MIN, SCALE_STEP, THEMES, clampScale, type Settings } from "../settings";
@@ -1200,14 +1200,19 @@ export function PreviewModal(p: {
   encoding: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<Preview | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
+    setData(null);
+    setErr(null);
     api
       .previewEntry(p.archivePath, p.entryPath, p.password, p.encoding)
-      .then(setData)
-      .catch((e) => setErr(String(e)));
+      .then((value) => { if (active) setData(value); })
+      .catch((e) => { if (active) setErr(String(e)); });
+    return () => { active = false; };
   }, [p.archivePath, p.entryPath, p.password, p.encoding]);
 
   const name = p.entryPath.split("/").pop() ?? p.entryPath;
@@ -1217,21 +1222,21 @@ export function PreviewModal(p: {
       title={name}
       wide
       onClose={p.onClose}
-      footer={<button className="btn primary" onClick={p.onClose}>关闭</button>}
+      footer={<button className="btn primary" onClick={p.onClose}>{t("common.close")}</button>}
     >
-      {err && <div className="error-text">预览失败：{err}</div>}
-      {!data && !err && <div className="hint">加载中…</div>}
+      {err && <div className="error-text">{t("preview.failed", { message: explainError(err) })}</div>}
+      {!data && !err && <div className="hint">{t("preview.loading")}</div>}
       {data && (
         <>
           <div className="hint">
             {fmtSize(data.size)}
-            {data.truncated && " · 内容过大，仅显示前 8 MB"}
+            {data.truncated && <> · {t("preview.truncated")}</>}
           </div>
           <div className="preview-body">
             {data.kind === "text" && <pre>{data.text}</pre>}
             {data.kind === "image" && <img src={`data:${data.mime};base64,${data.data}`} alt={name} />}
             {data.kind === "binary" && (
-              <pre style={{ color: "var(--text-dim)" }}>二进制文件，无法预览。可解压后用其他应用打开。</pre>
+              <pre style={{ color: "var(--text-dim)" }}>{t("preview.binary")}</pre>
             )}
           </div>
         </>

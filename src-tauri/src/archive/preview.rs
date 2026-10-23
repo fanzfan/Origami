@@ -76,21 +76,31 @@ fn build_preview(name: &str, data: Vec<u8>, truncated: bool, full_size: u64) -> 
     }
 }
 
-fn read_capped(r: &mut dyn Read) -> anyhow::Result<(Vec<u8>, bool)> {
-    let mut data = Vec::new();
-    let mut buf = [0u8; 64 * 1024];
-    let mut truncated = false;
-    loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        data.extend_from_slice(&buf[..n]);
-        if data.len() as u64 >= MAX_PREVIEW {
-            truncated = true;
-            break;
-        }
+#[cfg(test)]
+mod tests {
+    use super::{read_capped, MAX_PREVIEW};
+    use std::io::Cursor;
+
+    #[test]
+    fn capped_reader_reads_one_extra_byte_to_detect_truncation() {
+        let mut input = vec![b'x'; MAX_PREVIEW as usize];
+        let (data, truncated) = read_capped(&mut Cursor::new(&input)).unwrap();
+        assert_eq!(data.len() as u64, MAX_PREVIEW);
+        assert!(!truncated);
+
+        input.push(b'x');
+        let (data, truncated) = read_capped(&mut Cursor::new(&input)).unwrap();
+        assert_eq!(data.len() as u64, MAX_PREVIEW);
+        assert!(truncated);
     }
+}
+
+fn read_capped(r: &mut dyn Read) -> anyhow::Result<(Vec<u8>, bool)> {
+    // 多读 1 字节来区分“恰好到上限”和“确实被截断”。
+    let mut data = Vec::with_capacity(MAX_PREVIEW as usize + 1);
+    r.take(MAX_PREVIEW + 1).read_to_end(&mut data)?;
+    let truncated = data.len() as u64 > MAX_PREVIEW;
+    data.truncate(MAX_PREVIEW as usize);
     Ok((data, truncated))
 }
 
@@ -200,28 +210,76 @@ pub fn preview_entry(
             cands.extend(fallbacks.get().iter().cloned().map(Some));
             let mut last = anyhow::anyhow!("条目不存在: {entry_path}");
             for cand in cands {
-                let result = (|| -> Result<Option<(String, Vec<u8>, u64)>, unrar::error::UnrarError> {
-                    let archive = match &cand {
-                        Some(p) => unrar::Archive::with_password(archive_path, p),
-                        None => unrar::Archive::new(archive_path),
-                    };
-                    let mut open = archive.open_for_processing()?;
-                    loop {
-                        let Some(cursor) = open.read_header()? else { break };
-                        let name = cursor.entry().filename.to_string_lossy().replace('\\', "/");
-                        let size = cursor.entry().unpacked_size;
-                        if name == entry_path {
-                            let (data, _next) = cursor.read()?;
-                            return Ok(Some((name, data, size)));
+                let temp_dir = tempfile::tempdir()?;
+                let temp_file = temp_dir.path().join("preview.bin");
+                let result =
+                    (|| -> Result<Option<(String, u64, bool)>, unrar::error::UnrarError> {
+                        let archive = match &cand {
+                            Some(p) => unrar::Archive::with_password(archive_path, p),
+                            None => unrar::Archive::new(archive_path),
+                        };
+                        let mut open = archive.open_for_processing()?;
+                        loop {
+                            let Some(cursor) = open.read_header()? else {
+                                break;
+                            };
+                            let name = cursor.entry().filename.to_string_lossy().replace('\\', "/");
+                            let size = cursor.entry().unpacked_size;
+                            if name == entry_path {
+                                // unrar 0.5.x 只提供 read()->Vec<u8>，没有带长度上限的流式读取。
+                                // 大条目在解码前按头部声明大小拒绝，避免将完整内容读入 Rust 内存。
+                                if size > MAX_PREVIEW {
+                                    let split_after = cursor.entry().is_split_after();
+                                    let encrypted = cursor.entry().is_encrypted();
+                                    open = if encrypted {
+                                        cursor.test()?
+                                    } else {
+                                        cursor.skip()?
+                                    };
+                                    if split_after && !encrypted {
+                                        // 只跟进同名且带 split-before 标志的目标续卷；遇到其他条目
+                                        // 立即停止，避免把后续条目的错误归到当前预览上。
+                                        loop {
+                                            let Some(next) = open.read_header()? else {
+                                                break;
+                                            };
+                                            let next_name = next
+                                                .entry()
+                                                .filename
+                                                .to_string_lossy()
+                                                .replace('\\', "/");
+                                            if next_name != name || !next.entry().is_split_before()
+                                            {
+                                                break;
+                                            }
+                                            let next_split_after = next.entry().is_split_after();
+                                            open = if next.entry().is_encrypted() {
+                                                next.test()?
+                                            } else {
+                                                next.skip()?
+                                            };
+                                            if !next_split_after {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    return Ok(Some((name, size, true)));
+                                }
+                                cursor.extract_to(&temp_file)?;
+                                return Ok(Some((name, size, false)));
+                            }
+                            open = cursor.skip()?;
                         }
-                        open = cursor.skip()?;
-                    }
-                    Ok(None)
-                })();
+                        Ok(None)
+                    })();
                 match result {
-                    Ok(Some((name, mut data, size))) => {
-                        let truncated = data.len() as u64 > MAX_PREVIEW;
-                        data.truncate(MAX_PREVIEW as usize);
+                    Ok(Some((_name, size, true))) => {
+                        return Err(anyhow::anyhow!("RAR_PREVIEW_TOO_LARGE:{size}"));
+                    }
+                    Ok(Some((name, _size, false))) => {
+                        let mut file = std::fs::File::open(&temp_file)?;
+                        let size = file.metadata()?.len();
+                        let (data, truncated) = read_capped(&mut file)?;
                         return Ok(build_preview(&name, data, truncated, size));
                     }
                     Ok(None) => anyhow::bail!("条目不存在: {entry_path}"),

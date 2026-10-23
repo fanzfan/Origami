@@ -6,6 +6,12 @@ export const zhCN = {
     cancelled: "已取消",
     preparing: "准备中…",
   },
+  preview: {
+    failed: "预览失败：{{message}}",
+    loading: "加载中…",
+    truncated: "内容过大，仅显示前 8 MiB",
+    binary: "二进制文件，无法预览。可解压后用其他应用打开。",
+  },
   task: {
     quick: "快捷任务",
     execute: "执行任务",
@@ -189,6 +195,7 @@ export const zhCN = {
       // 后端返回的哨兵错误，转成人话。
       reason: {
         rarVolumeRequired: "无法读取后续 RAR 分卷。请确认所有分卷均已下载完整，保留原始文件名，并放在同一个文件夹里。",
+        rarPreviewTooLarge: "RAR 条目超过 8 MiB 预览上限，请先解压再打开。",
         missingVolumes: "分卷不完整，缺少：{{names}}。请把所有分卷放在同一个文件夹里。",
         spannedZip: "暂不支持跨卷 ZIP（.z01 + .zip）。请先用其他工具合并成单个 .zip。",
         splitReadonly: "分卷压缩包只读，无法增删其中的条目。",

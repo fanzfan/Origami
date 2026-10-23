@@ -12,6 +12,12 @@ export const enUS = {
     cancelled: "Cancelled",
     preparing: "Preparing…",
   },
+  preview: {
+    failed: "Preview failed: {{message}}",
+    loading: "Loading…",
+    truncated: "Content is too large; showing only the first 8 MiB",
+    binary: "This binary file cannot be previewed. Extract it and open it in another app.",
+  },
   task: {
     quick: "Quick task",
     execute: "Task",
@@ -194,6 +200,7 @@ export const enUS = {
       dragOut: "Drag out failed: {{message}}",
       reason: {
         rarVolumeRequired: "Cannot read the next RAR volume. Make sure all volumes are fully downloaded, keep their original names, and place them in the same folder.",
+        rarPreviewTooLarge: "This RAR entry exceeds the 8 MiB preview limit. Extract it before opening.",
         missingVolumes:
           "The volume set is incomplete. Missing: {{names}}. Keep every volume in the same folder.",
         spannedZip:

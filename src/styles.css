@@ -450,7 +450,7 @@ input[type="checkbox"] { accent-color: var(--accent); }
   border-radius: 14px;
   box-shadow: var(--surface-shadow);
 }
-table.files { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.files { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
 table.files th {
   position: sticky; top: 0;
   background: color-mix(in srgb, var(--bg-elev) 88%, var(--accent-soft) 12%);
@@ -474,6 +474,18 @@ table.files td {
 }
 table.files td.name { display: flex; align-items: center; gap: 8px; max-width: none; }
 table.files tr { cursor: default; }
+table.files tbody tr.virtual-row,
+table.files tbody tr.file-parent-row { height: 36px; }
+table.files tbody tr.virtual-row td,
+table.files tbody tr.file-parent-row td {
+  box-sizing: border-box;
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+table.files tbody tr.virtual-spacer,
+table.files tbody tr.virtual-spacer:hover { cursor: default; background: transparent; }
+table.files tbody tr.virtual-spacer td { padding: 0; border: 0; line-height: 0; font-size: 0; }
 table.files tbody tr:hover { background: var(--bg-hover); }
 table.files tbody tr.sel {
   background: color-mix(in srgb, var(--accent) 11%, transparent);

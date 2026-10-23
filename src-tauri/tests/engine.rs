@@ -207,6 +207,64 @@ fn zip_threads_one_and_two_roundtrip() {
 }
 
 #[test]
+fn zip_parallel_incompressible_entries_roundtrip() {
+    let app = tauri::test::mock_app();
+    let handle = app.handle();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("random-data");
+    fs::create_dir_all(&root).unwrap();
+    let mut expected = Vec::new();
+    for file_index in 0..2u64 {
+        let mut state = 0x1234_5678_9abc_def0u64 ^ file_index;
+        let bytes: Vec<u8> = (0..512 * 1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        fs::write(root.join(format!("random-{file_index}.bin")), &bytes).unwrap();
+        expected.push(bytes);
+    }
+
+    let sources = vec![root.to_string_lossy().to_string()];
+    let dest = tmp.path().join("random.zip");
+    let mut opts = create_opts("zip", None);
+    opts.threads = 2;
+    create(&ctx(handle), &dest, &sources, &opts).unwrap();
+
+    let out = tmp.path().join("extracted");
+    fs::create_dir_all(&out).unwrap();
+    extract(&ctx(handle), &dest, &out, &extract_opts(None, false)).unwrap();
+    for (file_index, bytes) in expected.iter().enumerate() {
+        assert_eq!(
+            fs::read(out.join(format!("random-data/random-{file_index}.bin"))).unwrap(),
+            *bytes,
+            "parallel ZIP changed incompressible entry {file_index}"
+        );
+    }
+}
+
+#[test]
+fn zip_parallel_cancel_removes_partial_output() {
+    let app = tauri::test::mock_app();
+    let tmp = tempfile::tempdir().unwrap();
+    let sources = make_many_small_sources(tmp.path());
+    let dest = tmp.path().join("cancelled.zip");
+    let mut opts = create_opts("zip", None);
+    opts.threads = 2;
+    let ctx = Ctx {
+        app: app.handle(),
+        cancel: Arc::new(AtomicBool::new(true)),
+    };
+
+    let error = create(&ctx, &dest, &sources, &opts).unwrap_err();
+    assert!(format!("{error:#}").contains("CANCELLED"), "got {error:#}");
+    assert!(!dest.exists(), "cancelled ZIP output should be removed");
+}
+
+#[test]
 fn threaded_7z_and_tar_roundtrips() {
     for threads in [1, 2] {
         roundtrip_mt("7z", "7z", None, "", threads);

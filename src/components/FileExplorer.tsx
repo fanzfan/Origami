@@ -3,6 +3,7 @@ import { api, DirListing, FsEntry, fmtDate, fmtSize, fsBreadcrumbs, isArchive } 
 import { FileIcon, UiIcon } from "../icons";
 import { PathBar } from "./PathBar";
 import { useDragOut } from "./useDragOut";
+import { useVirtualRows } from "./useVirtualRows";
 
 // 应用内文件管理器（文件系统视图）。浏览任意真实路径；双击文件夹进入、双击压缩包
 // 像进文件夹一样进入其内部、双击普通文件用默认程序打开。右键菜单为「压缩」（与压缩包
@@ -46,6 +47,9 @@ export function FileExplorer(p: Props) {
     });
     return all;
   }, [p.listing.entries, sortKey, sortAsc]);
+
+  const hasParentRow = p.listing.parent !== null;
+  const virtual = useVirtualRows(rows.length, p.listing.path, hasParentRow);
 
   const clickSort = (k: SortKey) => {
     if (sortKey === k) setSortAsc(!sortAsc);
@@ -159,10 +163,20 @@ export function FileExplorer(p: Props) {
         onSubmit={(v) => p.onNavigate(v)}
       />
 
-      <div className="filelist">
-        <table className="files">
-          <thead>
-            <tr>
+      <div
+        className="filelist"
+        ref={virtual.containerRef}
+        data-total-rows={rows.length}
+        data-virtualized="true"
+      >
+        <table className="files" aria-rowcount={rows.length + 1 + Number(hasParentRow)}>
+          <colgroup>
+            <col />
+            <col style={{ width: 110 }} />
+            <col style={{ width: 160 }} />
+          </colgroup>
+          <thead ref={virtual.headerRef}>
+            <tr aria-rowindex={1}>
               <th onClick={() => clickSort("name")}>名称{sortIcon("name")}</th>
               <th onClick={() => clickSort("size")} style={{ width: 110, textAlign: "right" }}>
                 大小{sortIcon("size")}
@@ -173,8 +187,15 @@ export function FileExplorer(p: Props) {
             </tr>
           </thead>
           <tbody>
-            {p.listing.parent !== null && (
-              <tr onDoubleClick={() => p.onNavigate(p.listing.parent!)}>
+            {hasParentRow && (
+              <tr
+                ref={virtual.fixedRowRef}
+                className="file-parent-row"
+                data-entry-path={p.listing.parent!}
+                data-row-index={-1}
+                aria-rowindex={2}
+                onDoubleClick={() => p.onNavigate(p.listing.parent!)}
+              >
                 <td className="name">
                   <span className="icon"><UiIcon name="up" size={18} /></span>
                   <span>..</span>
@@ -183,23 +204,39 @@ export function FileExplorer(p: Props) {
                 <td />
               </tr>
             )}
-            {rows.map((r) => (
-              <tr
-                key={r.path}
-                className={selected.has(r.path) ? "sel" : ""}
-                onMouseDown={(e) => armDragOut(r.path, e)}
-                onClick={(e) => toggleSelect(r, e)}
-                onDoubleClick={() => onDouble(r)}
-                onContextMenu={(e) => openMenu(r, e)}
-              >
-                <td className="name">
-                  <FileIcon name={r.name} isDir={r.isDir} />
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-                </td>
-                <td className="num">{r.isDir ? "—" : fmtSize(r.size)}</td>
-                <td style={{ color: "var(--text-dim)" }}>{fmtDate(r.mtime)}</td>
+            {virtual.topPadding > 0 && (
+              <tr className="virtual-spacer" aria-hidden="true">
+                <td colSpan={3} style={{ height: virtual.topPadding }} />
               </tr>
-            ))}
+            )}
+            {rows.slice(virtual.startIndex, virtual.endIndex).map((r, offset) => {
+              const rowIndex = virtual.startIndex + offset;
+              return (
+                <tr
+                  key={r.path}
+                  className={`virtual-row${selected.has(r.path) ? " sel" : ""}`}
+                  data-entry-path={r.path}
+                  data-row-index={rowIndex}
+                  aria-rowindex={rowIndex + 2 + Number(hasParentRow)}
+                  onMouseDown={(e) => armDragOut(r.path, e)}
+                  onClick={(e) => toggleSelect(r, e)}
+                  onDoubleClick={() => onDouble(r)}
+                  onContextMenu={(e) => openMenu(r, e)}
+                >
+                  <td className="name">
+                    <FileIcon name={r.name} isDir={r.isDir} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+                  </td>
+                  <td className="num">{r.isDir ? "—" : fmtSize(r.size)}</td>
+                  <td style={{ color: "var(--text-dim)" }}>{fmtDate(r.mtime)}</td>
+                </tr>
+              );
+            })}
+            {virtual.bottomPadding > 0 && (
+              <tr className="virtual-spacer" aria-hidden="true">
+                <td colSpan={3} style={{ height: virtual.bottomPadding }} />
+              </tr>
+            )}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={3} style={{ textAlign: "center", padding: 30, color: "var(--text-dim)" }}>
